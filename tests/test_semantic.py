@@ -1,4 +1,3 @@
-import pytest
 from cig import PyCausalEngine
 from cig.passes.pass2_semantic import SemanticCausalExtractor, InferredEdge
 

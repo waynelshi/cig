@@ -1,4 +1,3 @@
-import pytest
 from cig import PyCausalEngine
 from cig.hooks.interceptor import IDEInterceptor
 

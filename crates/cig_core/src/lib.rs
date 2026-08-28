@@ -125,7 +125,9 @@ impl PyCausalEngine {
                     .extract::<String>()?;
                 let conf = dict
                     .get_item("confidence")?
-                    .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyKeyError, _>("missing confidence"))?
+                    .ok_or_else(|| {
+                        PyErr::new::<pyo3::exceptions::PyKeyError, _>("missing confidence")
+                    })?
                     .extract::<f32>()?;
                 let prov = dict
                     .get_item("provenance")?

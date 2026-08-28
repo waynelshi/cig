@@ -1,4 +1,3 @@
-import pytest
 from cig import PyCausalEngine
 
 

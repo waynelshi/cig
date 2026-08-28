@@ -79,10 +79,9 @@ impl<'a> DSeparationEngine<'a> {
 
         // Initialize queue from all nodes in X
         for &x in &x_set {
-            // Can leave X via outgoing edges
             queue.push_back((x, TraversalDir::Outgoing));
             visited.insert((x, TraversalDir::Outgoing));
-            // Can also leave X via incoming edges (treating as upstream fork)
+
             queue.push_back((x, TraversalDir::Incoming));
             visited.insert((x, TraversalDir::Incoming));
         }
@@ -97,8 +96,6 @@ impl<'a> DSeparationEngine<'a> {
 
             match dir {
                 TraversalDir::Incoming => {
-                    // Arrived at curr via `prev -> curr`
-                    
                     // Case 1: Traversal continues as non-collider (curr -> next)
                     // Allowed ONLY IF curr is NOT in Z
                     if !z_set.contains(&curr) {
@@ -125,7 +122,6 @@ impl<'a> DSeparationEngine<'a> {
                 }
                 TraversalDir::Outgoing => {
                     // Arrived at curr via `prev <- curr` (or starting at X)
-                    // curr acts as a fork / non-collider
                     // Allowed ONLY IF curr is NOT in Z
                     if !z_set.contains(&curr) {
                         // curr -> next
@@ -149,6 +145,6 @@ impl<'a> DSeparationEngine<'a> {
             }
         }
 
-        true // No active path reached Y
+        true
     }
 }

@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import pytest
 from cig import PyCausalEngine
 from cig.passes.pass4_engine import CausalEstimationEngine
 

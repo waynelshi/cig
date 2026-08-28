@@ -89,9 +89,7 @@ impl<'a> CausalCriteriaEngine<'a> {
             .causal_graph
             .node_indices
             .iter()
-            .filter(|(&ref _name, &idx)| {
-                idx != x_idx && idx != y_idx && !x_descendants.contains(&idx)
-            })
+            .filter(|(_name, &idx)| idx != x_idx && idx != y_idx && !x_descendants.contains(&idx))
             .map(|(name, _)| name.clone())
             .collect();
 

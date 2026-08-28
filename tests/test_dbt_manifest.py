@@ -1,5 +1,4 @@
 import json
-import pytest
 from cig.passes.pass1_lineage import DBTManifestParser
 
 

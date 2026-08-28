@@ -13,7 +13,6 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field
 from scipy import stats
-import dowhy
 from dowhy import CausalModel
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 

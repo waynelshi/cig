@@ -1,4 +1,3 @@
-import pytest
 from cig.passes.pass2_semantic import DBTSchemaDocExtractor
 
 

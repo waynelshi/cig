@@ -5,7 +5,7 @@ from the unified Structural Causal Model (SCMUnificationReport).
 """
 
 from pathlib import Path
-from typing import Optional, Union
+from typing import Union
 from cig.passes.pass3_unify import SCMUnificationReport, UnifiedEdge
 
 
