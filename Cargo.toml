@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/cig_core"]
+resolver = "2"

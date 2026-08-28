@@ -1,0 +1,55 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "cig"
+version = "0.1.0"
+description = "Causal Inference Graph Engine for Codebases & Data Pipelines"
+readme = "README.md"
+authors = [{ name = "cig contributors" }]
+requires-python = ">=3.11"
+dependencies = [
+    "sqlglot>=23.0.0",
+    "pydantic>=2.6.0",
+    "pandas>=2.2.0",
+    "numpy>=1.26.0",
+    "dowhy>=0.11.1",
+    "econml>=0.15.0",
+    "scikit-learn>=1.4.0",
+    "statsmodels>=0.14.0",
+    "pyyaml>=6.0.1",
+    "click>=8.1.7",
+    "rich>=13.7.0",
+    "tree-sitter>=0.22.0",
+    "tree-sitter-python>=0.21.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "maturin>=1.5.0",
+    "ruff>=0.3.0",
+]
+
+[project.scripts]
+cig = "cig.cli:main"
+cig-hook = "cig.hooks.interceptor:cli_hook_entrypoint"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+manifest-path = "crates/cig_core/Cargo.toml"
+module-name = "cig._cig_core"
+python-source = "python"
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning:dowhy.*:",
+    "ignore::Warning:dowhy.*:",
+    "ignore::FutureWarning:pandas.*:",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.6.2",
+]

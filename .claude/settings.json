@@ -1,0 +1,34 @@
+Configure Claude Code's PreToolUse interceptor to scan file edits and command executions before applying code changes:
+
+Create `.claude/settings.json`:
+
+```json
+{
+  "$schema": "https://json.schemastore.org/claude-settings.json",
+  "hooks": {
+    "preToolUse": [
+      {
+        "matcher": {
+          "tool": "FileEdit|WriteFile",
+          "params": {
+            "path": ".*\\.(py|sql)$"
+          }
+        },
+        "command": "uv run cig-hook --strict"
+      },
+      {
+        "matcher": {
+          "tool": "Bash",
+          "params": {
+            "command": ".*(python|pytest|dbt).*"
+          }
+        },
+        "command": "uv run cig-hook --file tests/test_econml_dml.py --graph .cig/cig_graph.json"
+      }
+    ]
+  },
+  "env": {
+    "CIG_STRICT_MODE": "1",
+    "CIG_GRAPH_PATH": ".cig/cig_graph.json"
+  }
+}

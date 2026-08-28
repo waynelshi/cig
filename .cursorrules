@@ -1,0 +1,14 @@
+# Causal Inference Guardrail (CIG)
+
+You are operating within a repository guarded by `cig` (Causal Inference Graph engine).
+Before executing regressions, training predictive models for policy intervention, or generating statistical estimation code, you MUST follow causal identification rules.
+
+## Mandatory Pre-Flight Check
+Whenever modifying scripts that perform statistical regression (e.g. `statsmodels`, `scikit-learn`, `econml`, `dbt` models):
+
+1. Inspect `.cig/cig_graph.json` to verify the compiled Structural Causal Model (SCM).
+2. Never perform a naive regression `Y ~ T` when common causes $W$ exist ($T \leftarrow W \rightarrow Y$).
+3. Never condition on a collider node $C$ ($T \rightarrow C \leftarrow Y$) or post-treatment mediator unless explicitly performing Mediation Decomposition.
+4. Run the causal pre-flight validation check via bash tool:
+   ```bash
+   uv run cig-hook --file <target_file> --strict
