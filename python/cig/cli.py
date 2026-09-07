@@ -28,6 +28,7 @@ from cig.passes.pass2_semantic import (
     DBTSchemaDocExtractor,
     SemanticCausalExtractor,
 )
+from cig.passes.pass2_discovery import CausalDiscoveryEngine
 from cig.passes.pass3_unify import SCMGraphUnification, SCMUnificationReport
 from cig.passes.pass4_engine import CausalEstimationEngine
 from cig.passes.pass5_counterfactual import StructuralCounterfactualEngine
@@ -252,6 +253,61 @@ def scan_cmd(path: str):
     console.print(
         f"[bold green]✔ SCM Markdown & Mermaid documentation:[/bold green] {md_path}"
     )
+
+
+@main.command(name="discover")
+@click.option(
+    "--data",
+    "-d",
+    required=True,
+    type=click.Path(exists=True, file_okay=True),
+    help="CSV dataset for causal discovery",
+)
+@click.option(
+    "--alpha",
+    "-a",
+    default=0.05,
+    type=float,
+    help="Significance threshold for conditional independence",
+)
+@click.option(
+    "--max-cond", "-m", default=2, type=int, help="Maximum conditioning set size"
+)
+def discover_cmd(data: str, alpha: float, max_cond: int):
+    """Discovers causal skeleton and orientations directly from observational distributions."""
+    df = pd.read_csv(data)
+    engine = CausalDiscoveryEngine(significance_level=alpha, max_cond_size=max_cond)
+
+    console.print(
+        f"[bold cyan]🔍 Running Continuous Causal Discovery on {data}...[/bold cyan]"
+    )
+    discovered_edges = engine.discover_edges(df)
+
+    if not discovered_edges:
+        console.print(
+            "[yellow]No statistically significant causal edges detected at this alpha threshold.[/yellow]"
+        )
+        return
+
+    table = Table(
+        title=f"Data-Discovered Causal Edges (α = {alpha})",
+        show_header=True,
+        header_style="bold green",
+    )
+    table.add_column("Learned Edge", style="dim")
+    table.add_column("Confidence (1 - p)", justify="right")
+    table.add_column("Partial Correlation", justify="right")
+    table.add_column("p-value", justify="right")
+
+    for e in discovered_edges:
+        table.add_row(
+            f"{e.source} -> {e.target}",
+            f"{e.confidence:.4f}",
+            f"{e.partial_corr:+.4f}",
+            f"{e.p_value:.6f}",
+        )
+
+    console.print(table)
 
 
 @main.command(name="do")

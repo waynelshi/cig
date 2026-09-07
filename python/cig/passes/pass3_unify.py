@@ -1,6 +1,6 @@
 """
 Pass 3: SCM Graph Unification & Conflict Resolution.
-Consolidates EXTRACTED and INFERRED edges, detects cycles/contradictions,
+Consolidates EXTRACTED, INFERRED, and DISCOVERED edges, detects cycles/contradictions,
 flags AMBIGUOUS relationships, and produces .cig artifacts.
 """
 
@@ -14,12 +14,15 @@ from pydantic import BaseModel, Field
 from cig import PyCausalEngine
 from cig.passes.pass1_lineage import ExtractedEdge
 from cig.passes.pass2_semantic import InferredEdge
+from cig.passes.pass2_discovery import DiscoveredEdge
 
 
 class UnifiedEdge(BaseModel):
     source: str
     target: str
-    edge_type: str = Field(description="'EXTRACTED', 'INFERRED', or 'AMBIGUOUS'")
+    edge_type: str = Field(
+        description="'EXTRACTED', 'INFERRED', 'DISCOVERED', or 'AMBIGUOUS'"
+    )
     confidence: float
     provenance: list[str] = Field(default_factory=list)
     mechanisms: list[str] = Field(default_factory=list)
@@ -31,6 +34,7 @@ class SCMUnificationReport(BaseModel):
     total_edges: int
     extracted_edges: int
     inferred_edges: int
+    discovered_edges: int = 0
     ambiguous_edges: int
     god_confounders: list[str] = Field(
         description="Hub nodes with high out-degree influencing multiple variables"
@@ -40,7 +44,7 @@ class SCMUnificationReport(BaseModel):
 
 class SCMGraphUnification:
     def __init__(self):
-        self.raw_edges: list[ExtractedEdge | InferredEdge] = []
+        self.raw_edges: list[ExtractedEdge | InferredEdge | DiscoveredEdge] = []
         self.unified_edges: dict[tuple[str, str], UnifiedEdge] = {}
 
     def add_extracted_edges(self, edges: list[ExtractedEdge]) -> None:
@@ -49,13 +53,17 @@ class SCMGraphUnification:
     def add_inferred_edges(self, edges: list[InferredEdge]) -> None:
         self.raw_edges.extend(edges)
 
+    def add_discovered_edges(self, edges: list[DiscoveredEdge]) -> None:
+        """Registers data-driven edges learned from observational distributions."""
+        self.raw_edges.extend(edges)
+
     def unify(self) -> SCMUnificationReport:
         """
         Consolidates edges, resolves conflicts, and produces the unified SCM.
         """
-        grouped: dict[tuple[str, str], list[ExtractedEdge | InferredEdge]] = (
-            defaultdict(list)
-        )
+        grouped: dict[
+            tuple[str, str], list[ExtractedEdge | InferredEdge | DiscoveredEdge]
+        ] = defaultdict(list)
 
         for e in self.raw_edges:
             grouped[(e.source, e.target)].append(e)
@@ -64,11 +72,12 @@ class SCMGraphUnification:
 
         # 1. Merge parallel edges going the same direction (A -> B)
         for (u, v), edge_list in grouped.items():
-            extracted = [e for e in edge_list if e.edge_type == "EXTRACTED"]
-            inferred = [e for e in edge_list if e.edge_type == "INFERRED"]
+            extracted = [e for e in edge_list if isinstance(e, ExtractedEdge)]
+            inferred = [e for e in edge_list if isinstance(e, InferredEdge)]
+            discovered = [e for e in edge_list if isinstance(e, DiscoveredEdge)]
 
-            provenance = []
-            mechanisms = []
+            provenance: list[str] = []
+            mechanisms: list[str] = []
 
             for e in edge_list:
                 if isinstance(e, ExtractedEdge):
@@ -79,9 +88,17 @@ class SCMGraphUnification:
                     provenance.append(f"[Doc/LLM] {e.provenance}")
                     if e.rationale:
                         mechanisms.append(f"Rationale: {e.rationale}")
+                elif isinstance(e, DiscoveredEdge):
+                    provenance.append(
+                        f"[DataDiscovery] partial_r={e.partial_corr:+.3f}, p={e.p_value:.4f}"
+                    )
+                    if e.conditioning_set:
+                        mechanisms.append(
+                            f"Conditioned on: {', '.join(e.conditioning_set)}"
+                        )
 
             if extracted:
-                # Deterministic wins
+                # Deterministic code lineage always takes precedence
                 self.unified_edges[(u, v)] = UnifiedEdge(
                     source=u,
                     target=v,
@@ -91,17 +108,21 @@ class SCMGraphUnification:
                     mechanisms=list(set(mechanisms)),
                 )
             else:
-                # Combine multiple inferred confidences: 1 - product(1 - c)
-                confidences = [e.confidence for e in inferred]
+                # Combine probabilistic confidences: 1 - product(1 - c)
+                prob_confidences = [e.confidence for e in inferred + discovered]
                 combined_conf = 1.0
-                for c in confidences:
+                for c in prob_confidences:
                     combined_conf *= 1.0 - c
                 final_conf = round(1.0 - combined_conf, 3)
+
+                primary_type = (
+                    "DISCOVERED" if discovered and not inferred else "INFERRED"
+                )
 
                 self.unified_edges[(u, v)] = UnifiedEdge(
                     source=u,
                     target=v,
-                    edge_type="INFERRED",
+                    edge_type=primary_type,
                     confidence=final_conf,
                     provenance=list(set(provenance)),
                     mechanisms=list(set(mechanisms)),
@@ -115,16 +136,19 @@ class SCMGraphUnification:
                 checked_pairs.add((u, v))
                 checked_pairs.add((v, u))
 
-                # Conflict resolution:
-                # If one is EXTRACTED and the other is INFERRED, EXTRACTED overrides
-                if edge_uv.edge_type == "EXTRACTED" and edge_vu.edge_type == "INFERRED":
+                # If one is EXTRACTED and the other is probabilistic, EXTRACTED wins
+                if (
+                    edge_uv.edge_type == "EXTRACTED"
+                    and edge_vu.edge_type != "EXTRACTED"
+                ):
                     del self.unified_edges[(v, u)]
                 elif (
-                    edge_vu.edge_type == "EXTRACTED" and edge_uv.edge_type == "INFERRED"
+                    edge_vu.edge_type == "EXTRACTED"
+                    and edge_uv.edge_type != "EXTRACTED"
                 ):
                     del self.unified_edges[(u, v)]
                 else:
-                    # Both INFERRED -> Contradiction! Mark both as AMBIGUOUS
+                    # Neither is deterministic ground-truth -> mark both as AMBIGUOUS
                     edge_uv.edge_type = "AMBIGUOUS"
                     edge_uv.conflict_notes = (
                         f"Contradicted by reverse edge ({v} -> {u})"
@@ -142,7 +166,6 @@ class SCMGraphUnification:
             all_nodes.add(v)
             out_degrees[u] += 1
 
-        # Nodes that affect 3 or more variables are candidate god confounders
         god_confounders = [node for node, deg in out_degrees.items() if deg >= 3]
 
         extracted_cnt = sum(
@@ -150,6 +173,9 @@ class SCMGraphUnification:
         )
         inferred_cnt = sum(
             1 for e in self.unified_edges.values() if e.edge_type == "INFERRED"
+        )
+        discovered_cnt = sum(
+            1 for e in self.unified_edges.values() if e.edge_type == "DISCOVERED"
         )
         ambiguous_cnt = sum(
             1 for e in self.unified_edges.values() if e.edge_type == "AMBIGUOUS"
@@ -160,6 +186,7 @@ class SCMGraphUnification:
             total_edges=len(self.unified_edges),
             extracted_edges=extracted_cnt,
             inferred_edges=inferred_cnt,
+            discovered_edges=discovered_cnt,
             ambiguous_edges=ambiguous_cnt,
             god_confounders=god_confounders,
             edges=list(self.unified_edges.values()),
@@ -177,7 +204,7 @@ class SCMGraphUnification:
                     "; ".join(edge.mechanisms) if edge.mechanisms else None,
                 )
                 loaded += 1
-            elif edge.edge_type == "INFERRED":
+            elif edge.edge_type in ("INFERRED", "DISCOVERED"):
                 engine.add_inferred_edge(
                     edge.source,
                     edge.target,
@@ -195,12 +222,10 @@ class SCMGraphUnification:
         path = Path(out_dir)
         path.mkdir(parents=True, exist_ok=True)
 
-        # 1. Write JSON artifact
         json_path = path / "cig_graph.json"
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(report.model_dump(), f, indent=2)
 
-        # 2. Write Markdown summary report
         md_path = path / "CIG_REPORT.md"
         with open(md_path, "w", encoding="utf-8") as f:
             f.write("# CIG Structural Causal Model Report\n\n")
@@ -208,6 +233,7 @@ class SCMGraphUnification:
             f.write(f"- **Total Causal Connections:** {report.total_edges}\n")
             f.write(f"- **Deterministic (`EXTRACTED`):** {report.extracted_edges}\n")
             f.write(f"- **Hypothesized (`INFERRED`):** {report.inferred_edges}\n")
+            f.write(f"- **Data-Driven (`DISCOVERED`):** {report.discovered_edges}\n")
             f.write(f"- **Contradictions (`AMBIGUOUS`):** {report.ambiguous_edges}\n\n")
 
             if report.god_confounders:
