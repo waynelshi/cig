@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import Path
+from typing import Sequence
 import json
 from pydantic import BaseModel, Field
 
@@ -15,6 +16,7 @@ from cig import PyCausalEngine
 from cig.passes.pass1_lineage import ExtractedEdge
 from cig.passes.pass2_semantic import InferredEdge
 from cig.passes.pass2_discovery import DiscoveredEdge
+from cig.passes.namespace import NamespaceResolver
 
 
 class UnifiedEdge(BaseModel):
@@ -43,9 +45,10 @@ class SCMUnificationReport(BaseModel):
 
 
 class SCMGraphUnification:
-    def __init__(self):
+    def __init__(self, known_canonicals: Sequence[str] | None = None):
         self.raw_edges: list[ExtractedEdge | InferredEdge | DiscoveredEdge] = []
         self.unified_edges: dict[tuple[str, str], UnifiedEdge] = {}
+        self.resolver = NamespaceResolver(known_canonicals)
 
     def add_extracted_edges(self, edges: list[ExtractedEdge]) -> None:
         self.raw_edges.extend(edges)
@@ -61,12 +64,31 @@ class SCMGraphUnification:
         """
         Consolidates edges, resolves conflicts, and produces the unified SCM.
         """
+        all_raw_nodes = set()
+        for e in self.raw_edges:
+            all_raw_nodes.add(e.source)
+            all_raw_nodes.add(e.target)
+
+        # Seed terminal naked columns as base canonicals
+        terminals = {
+            NamespaceResolver.extract_terminal_column(n) for n in all_raw_nodes
+        }
+        self.resolver.register_canonical(list(terminals))
+
         grouped: dict[
             tuple[str, str], list[ExtractedEdge | InferredEdge | DiscoveredEdge]
         ] = defaultdict(list)
 
         for e in self.raw_edges:
-            grouped[(e.source, e.target)].append(e)
+            # Reconcile endpoints
+            resolved_source = self.resolver.resolve(e.source)
+            resolved_target = self.resolver.resolve(e.target)
+
+            # Avoid self-loops created by alias collapse (e.g. revenue -> pricing_mart.revenue)
+            if resolved_source == resolved_target:
+                continue
+
+            grouped[(resolved_source, resolved_target)].append(e)
 
         self.unified_edges.clear()
 
