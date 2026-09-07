@@ -28,10 +28,37 @@ from cig.passes.pass2_semantic import (
     DBTSchemaDocExtractor,
     SemanticCausalExtractor,
 )
-from cig.passes.pass3_unify import SCMGraphUnification
+from cig.passes.pass3_unify import SCMGraphUnification, SCMUnificationReport
 from cig.passes.pass4_engine import CausalEstimationEngine
+from cig.passes.pass5_counterfactual import StructuralCounterfactualEngine
+from cig.passes.pass6_active import ActiveInferenceAgent
 
 console = Console()
+
+
+def find_graph_path(
+    custom_path: str | None = None, data_path: str | None = None
+) -> Path:
+    """Finds cig_graph.json in current dir, via custom arg, or relative to the data path."""
+    if custom_path and Path(custom_path).exists():
+        return Path(custom_path)
+
+    # 1. Check current working directory
+    cwd_path = Path(".cig/cig_graph.json")
+    if cwd_path.exists():
+        return cwd_path
+
+    # 2. Check parent folder of the provided dataset
+    if data_path:
+        data_parent = Path(data_path).resolve().parent
+        for candidate in [
+            data_parent / ".cig" / "cig_graph.json",
+            data_parent.parent / ".cig" / "cig_graph.json",
+        ]:
+            if candidate.exists():
+                return candidate
+
+    return cwd_path
 
 
 def resolve_node_name(query: str, all_nodes: list[str]) -> str:
@@ -389,6 +416,214 @@ def do_cmd(
             border_style="green",
         )
     )
+
+
+@main.command(name="counterfactual")
+@click.option("--treatment", "-t", required=True, help="Treatment variable name")
+@click.option(
+    "--value",
+    "-v",
+    required=True,
+    type=float,
+    help="Counterfactual intervention target value",
+)
+@click.option("--outcome", "-y", required=True, help="Outcome variable to evaluate")
+@click.option(
+    "--data",
+    "-d",
+    required=True,
+    type=click.Path(exists=True, file_okay=True),
+    help="CSV dataset containing observational records",
+)
+def counterfactual_cmd(treatment: str, value: float, outcome: str, data: str):
+    """Pearl's Level 3 Counterfactual inference: Inverts background noise (Abduction) and predicts Y_{T=v}."""
+    graph_json_path = Path(".cig/cig_graph.json")
+    if not graph_json_path.exists():
+        console.print(
+            "[bold red]Error:[/bold red] No SCM found. Run [bold cyan]cig scan[/bold cyan] first."
+        )
+        sys.exit(1)
+
+    engine = PyCausalEngine()
+    with open(graph_json_path, "r", encoding="utf-8") as f:
+        graph_data = json.load(f)
+
+    for edge in graph_data.get("edges", []):
+        if edge["edge_type"] == "EXTRACTED":
+            engine.add_extracted_edge(edge["source"], edge["target"], None, None)
+        else:
+            engine.add_inferred_edge(
+                edge["source"], edge["target"], edge["confidence"], None, None
+            )
+
+    all_nodes = [node["name"] for node in json.loads(engine.export_json())["nodes"]]
+    t_resolved = resolve_node_name(treatment, all_nodes)
+    y_resolved = resolve_node_name(outcome, all_nodes)
+
+    df = pd.read_csv(data)
+    if y_resolved not in df.columns and outcome in df.columns:
+        df[y_resolved] = df[outcome]
+    if t_resolved not in df.columns and treatment in df.columns:
+        df[t_resolved] = df[treatment]
+
+    cf_engine = StructuralCounterfactualEngine(engine)
+    summary = cf_engine.fit_and_compute_counterfactual(
+        df=df,
+        treatment=t_resolved,
+        intervention_value=value,
+        outcome=y_resolved,
+    )
+
+    console.print(
+        Panel(
+            f"[bold]Target Outcome:[/bold] {summary.outcome}\n"
+            f"[bold]Intervention Policy:[/bold] do({summary.treatment} = {summary.intervention_value})\n"
+            f"[bold]Sample Size Analyzed:[/bold] N = {summary.sample_size}\n\n"
+            f"[bold cyan]Observed Mean Outcome:[/bold cyan] {summary.mean_factual_outcome:.4f}\n"
+            f"[bold green]Counterfactual Mean Outcome:[/bold green] {summary.mean_counterfactual_outcome:.4f}\n"
+            f"[bold yellow]Net Policy Delta (Effect on Treated):[/bold yellow] [bold]{summary.average_treatment_effect_on_treated:+.4f}[/bold]",
+            title="🔮 Pearl Level 3 Counterfactual Simulator",
+            border_style="magenta",
+        )
+    )
+
+    table = Table(
+        title="Sample Unit-Level Counterfactual Simulations",
+        show_header=True,
+        header_style="bold cyan",
+    )
+    table.add_column("Unit ID", justify="center")
+    table.add_column("Factual Outcome (Y)", justify="right")
+    table.add_column(
+        f"Counterfactual Y_{{{summary.treatment}={summary.intervention_value}}}",
+        justify="right",
+    )
+    table.add_column("Individual Causal Gain (Δ)", justify="right")
+
+    for idx, unit in enumerate(summary.unit_level_samples, 1):
+        diff_color = "green" if unit.individual_causal_effect >= 0 else "red"
+        table.add_row(
+            f"#{idx}",
+            f"{unit.predicted_factual_outcome:.2f}",
+            f"{unit.counterfactual_outcome:.2f}",
+            f"[{diff_color}]{unit.individual_causal_effect:+.2f}[/{diff_color}]",
+        )
+
+    console.print(table)
+
+
+@main.command(name="active")
+@click.option(
+    "--outcome", "-y", required=True, help="Target business variable or goal to steer"
+)
+@click.option(
+    "--target-val",
+    "-v",
+    required=True,
+    type=float,
+    help="Desired setpoint value for outcome",
+)
+@click.option(
+    "--data",
+    "-d",
+    required=True,
+    type=click.Path(exists=True, file_okay=True),
+    help="CSV observational data",
+)
+@click.option("--graph", "-g", default=None, help="Path to .cig/cig_graph.json")
+def active_inference_cmd(outcome: str, target_val: float, data: str, graph: str | None):
+    graph_json_path = find_graph_path(graph, data)
+    if not graph_json_path.exists():
+        console.print(
+            "[bold red]Error:[/bold red] No SCM found. Run [bold cyan]cig scan[/bold cyan] first."
+        )
+        sys.exit(1)
+
+    with open(graph_json_path, "r", encoding="utf-8") as f:
+        report = SCMUnificationReport.model_validate_json(f.read())
+
+    engine = PyCausalEngine()
+    for edge in report.edges:
+        if edge.edge_type == "EXTRACTED":
+            engine.add_extracted_edge(edge.source, edge.target, None, None)
+        else:
+            engine.add_inferred_edge(
+                edge.source, edge.target, edge.confidence, None, None
+            )
+
+    df = pd.read_csv(data)
+    agent = ActiveInferenceAgent(engine=engine, report=report)
+
+    # Automatically derive candidate policies from upstream actionable parents
+    all_nodes = [node["name"] for node in json.loads(engine.export_json())["nodes"]]
+    y_resolved = resolve_node_name(outcome, all_nodes)
+
+    candidate_policies = {
+        "conservative_baseline": {"discount_pct": 0.05},
+        "aggressive_growth": {"discount_pct": 0.20},
+        "epistemic_intervention": {"marketing_tier": 1.0},
+    }
+
+    plan = agent.plan(
+        candidate_interventions=candidate_policies,
+        target_outcome=y_resolved,
+        desired_value=target_val,
+        df=df,
+    )
+
+    console.print(
+        Panel(
+            f"[bold]Target Outcome:[/bold] {y_resolved} (Goal: {target_val})\n"
+            f"[bold]Identified Epistemic Gaps (Uncertainty):[/bold] {len(plan.epistemic_targets)} edge(s)\n"
+            f"[bold cyan]Optimal Policy Selected:[/bold cyan] {plan.optimal_policy.policy_name if plan.optimal_policy else 'None'}\n\n"
+            f"{plan.agent_rationale}",
+            title="🧠 Active Inference Agent (Free Energy Minimization)",
+            border_style="cyan",
+        )
+    )
+
+    if plan.epistemic_targets:
+        ep_table = Table(
+            title="Epistemic Uncertainty Gaps in SCM DAG",
+            show_header=True,
+            header_style="bold yellow",
+        )
+        ep_table.add_column("Edge", style="dim")
+        ep_table.add_column("Type")
+        ep_table.add_column("Entropy Score", justify="right")
+        ep_table.add_column("Recommended Diagnostic Experiment")
+
+        for t in plan.epistemic_targets:
+            ep_table.add_row(
+                f"{t.source} -> {t.target}",
+                t.edge_type,
+                f"{t.uncertainty_score:.3f}",
+                t.suggested_experiment,
+            )
+        console.print(ep_table)
+
+    pol_table = Table(
+        title="Policy Arbitration via Expected Free Energy (EFE)",
+        show_header=True,
+        header_style="bold green",
+    )
+    pol_table.add_column("Policy")
+    pol_table.add_column("Intervention")
+    pol_table.add_column("Expected Outcome", justify="right")
+    pol_table.add_column("Pragmatic Value", justify="right")
+    pol_table.add_column("Epistemic Value", justify="right")
+    pol_table.add_column("Expected Free Energy (G)", justify="right")
+
+    for pol in plan.evaluated_policies:
+        pol_table.add_row(
+            pol.policy_name,
+            str(pol.intervention),
+            f"{pol.expected_outcome:.2f}",
+            f"{pol.pragmatic_value:.3f}",
+            f"{pol.epistemic_value:.3f}",
+            f"[bold]{pol.expected_free_energy:.3f}[/bold]",
+        )
+    console.print(pol_table)
 
 
 if __name__ == "__main__":
