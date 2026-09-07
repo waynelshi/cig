@@ -682,5 +682,285 @@ def active_inference_cmd(outcome: str, target_val: float, data: str, graph: str 
     console.print(pol_table)
 
 
+@main.command(name="run")
+@click.argument("path", default=".", type=click.Path(exists=True, file_okay=False))
+@click.option(
+    "--data",
+    "-d",
+    type=click.Path(exists=True, file_okay=True),
+    default=None,
+    help="Optional CSV dataset for continuous discovery, ATE estimation, and Active Inference",
+)
+@click.option(
+    "--treatment",
+    "-t",
+    default=None,
+    help="Primary treatment variable to evaluate",
+)
+@click.option(
+    "--outcome",
+    "-y",
+    default=None,
+    help="Primary target outcome variable to steer",
+)
+@click.option(
+    "--goal",
+    "-g",
+    default=None,
+    type=float,
+    help="Target setpoint goal for Active Inference (EFE minimization)",
+)
+def run_pipeline_cmd(
+    path: str,
+    data: str | None,
+    treatment: str | None,
+    outcome: str | None,
+    goal: float | None,
+):
+    """🚀 Run end-to-end multi-pass CIG causal pipeline: Scan -> Discover -> Unify -> Estimate -> Active Inference."""
+    base_path = Path(path)
+    console.print(
+        Panel(
+            f"[bold cyan]⚡ Running End-to-End CIG Causal Pipeline on:[/bold cyan] {base_path.resolve()}",
+            border_style="cyan",
+        )
+    )
+
+    unifier = SCMGraphUnification()
+    sql_parser = SQLLineageParser()
+    py_parser = PythonLineageParser()
+    dbt_manifest_parser = DBTManifestParser(sql_parser=sql_parser)
+    dbt_doc_extractor = DBTSchemaDocExtractor()
+    semantic_extractor = SemanticCausalExtractor()
+
+    # Pass 1: Lineage Extraction
+    for mf in base_path.rglob("manifest.json"):
+        if ".venv" not in mf.parts and ".cig" not in mf.parts:
+            try:
+                edges = dbt_manifest_parser.parse_file(mf)
+                if edges:
+                    unifier.add_extracted_edges(edges)
+            except Exception:
+                pass
+
+    for sf in base_path.rglob("*.sql"):
+        if ".venv" not in sf.parts and ".cig" not in sf.parts:
+            try:
+                edges = sql_parser.parse_file(sf)
+                if edges:
+                    unifier.add_extracted_edges(edges)
+            except Exception:
+                pass
+
+    for pf in base_path.rglob("*.py"):
+        if (
+            ".venv" not in pf.parts
+            and ".cig" not in pf.parts
+            and "test" not in pf.parts
+        ):
+            try:
+                edges = py_parser.parse_file(pf)
+                if edges:
+                    unifier.add_extracted_edges(edges)
+            except Exception:
+                pass
+
+    # Pass 2: Semantic Domain Extraction
+    for yf in base_path.rglob("*.yml"):
+        if ".venv" not in yf.parts and ".cig" not in yf.parts:
+            try:
+                edges = dbt_doc_extractor.parse_yaml_file(yf)
+                if edges:
+                    unifier.add_inferred_edges(edges)
+            except Exception:
+                pass
+
+    for mf in base_path.rglob("*.md"):
+        if ".venv" not in mf.parts and ".cig" not in mf.parts:
+            try:
+                edges = semantic_extractor.parse_file(mf)
+                if edges:
+                    unifier.add_inferred_edges(edges)
+            except Exception:
+                pass
+
+    # Pass 2B: Tabular Causal Discovery (if data is provided or auto-detected)
+    df = None
+    data_file = None
+    if data:
+        data_file = Path(data)
+    else:
+        # Auto-discover CSV if present in path/data
+        csv_candidates = [
+            p
+            for p in base_path.rglob("*.csv")
+            if ".venv" not in p.parts and ".cig" not in p.parts
+        ]
+        if csv_candidates:
+            data_file = csv_candidates[0]
+
+    if data_file and data_file.exists():
+        try:
+            df = pd.read_csv(data_file)
+            disc_engine = CausalDiscoveryEngine(
+                significance_level=0.05, max_cond_size=2
+            )
+            discovered_edges = disc_engine.discover_edges(df)
+            if discovered_edges:
+                unifier.add_discovered_edges(discovered_edges)
+                console.print(
+                    f"[bold purple]✔ Pass 2B Continuous Discovery:[/bold purple] Learned {len(discovered_edges)} edges from {data_file.name}"
+                )
+        except Exception as e:
+            console.print(f"[dim yellow]⚠ Data discovery skipped: {e}[/dim yellow]")
+
+    # Pass 3: SCM Unification with Namespace Reconciliation
+    report = unifier.unify()
+
+    # Export Artifacts
+    dot_cig_dir = base_path / ".cig"
+    dot_cig_dir.mkdir(exist_ok=True)
+
+    json_path = dot_cig_dir / "cig_graph.json"
+    html_path = dot_cig_dir / "cig.html"
+    md_path = dot_cig_dir / "SCM.md"
+    graphml_path = dot_cig_dir / "cig_graph.graphml"
+
+    json_path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    HTMLDAGVisualizer.generate_html(report, out_path=html_path)
+    SCMMarkdownExporter.export_to_file(report, out_path=md_path)
+    GraphMLExporter.export_to_file(report, out_path=graphml_path)
+
+    table = Table(
+        title="SCM Pipeline Compilation Summary",
+        show_header=True,
+        header_style="bold magenta",
+    )
+    table.add_column("Pipeline Stage", style="dim")
+    table.add_column("Result", justify="right")
+    table.add_row("Total Variables (Nodes)", str(report.total_nodes))
+    table.add_row("Total Causal Edges", str(report.total_edges))
+    table.add_row("Deterministic Lineages (Pass 1)", str(report.extracted_edges))
+    table.add_row("Domain Hypotheses (Pass 2)", str(report.inferred_edges))
+    table.add_row("Data-Driven Edges (Pass 2B)", str(report.discovered_edges))
+    table.add_row("Confounder Hubs (God Nodes)", str(len(report.god_confounders)))
+    console.print(table)
+
+    # Ingest into Rust PyCausalEngine
+    engine = PyCausalEngine()
+    unifier.populate_rust_engine(engine)
+
+    all_nodes = [node["name"] for node in json.loads(engine.export_json())["nodes"]]
+
+    # Pass 4 & Pass 6: Estimation & Active Inference
+    target_y = resolve_node_name(outcome, all_nodes) if outcome else None
+    target_t = resolve_node_name(treatment, all_nodes) if treatment else None
+
+    # Fallback auto-detection if none specified
+    if not target_y:
+        for candidate in ["revenue", "profit", "conversion_rate", "churn"]:
+            resolved = resolve_node_name(candidate, all_nodes)
+            if resolved in all_nodes:
+                target_y = resolved
+                break
+
+    if not target_t:
+        for candidate in ["discount_pct", "treatment_x", "price", "marketing_tier"]:
+            resolved = resolve_node_name(candidate, all_nodes)
+            if resolved in all_nodes:
+                target_t = resolved
+                break
+
+    if (
+        df is not None
+        and target_t
+        and target_y
+        and target_t in df.columns
+        and target_y in df.columns
+    ):
+        estimator = CausalEstimationEngine(engine)
+        try:
+            summary = estimator.estimate_effect(
+                df, treatment=target_t, outcome=target_y
+            )
+            sens = estimator.compute_sensitivity_analysis(
+                df, treatment=target_t, outcome=target_y
+            )
+
+            console.print(
+                Panel(
+                    f"[bold]Treatment:[/bold] {target_t} ➔ [bold]Outcome:[/bold] {target_y}\n"
+                    f"[bold green]ATE Estimate:[/bold green] {summary.value:.4f} ({summary.identification_method})\n"
+                    f"[bold]Cinelli-Hazlett Robustness (RV_q=1.0):[/bold] [bold cyan]{sens.rv_q * 100:.1f}%[/bold cyan]\n"
+                    f"[bold]VanderWeele-Ding E-Value:[/bold] [bold yellow]{sens.e_value:.2f}[/bold yellow]",
+                    title="📊 Pass 4: Automated Econometric & Sensitivity Audit",
+                    border_style="green",
+                )
+            )
+        except Exception as e:
+            console.print(
+                f"[dim yellow]⚠ Pass 4 Econometrics skipped: {e}[/dim yellow]"
+            )
+
+    if df is not None and target_y:
+        agent = ActiveInferenceAgent(engine=engine, report=report)
+        target_val = goal if goal is not None else float(df[target_y].mean() * 1.05)
+
+        # Default action policies
+        candidate_policies = {}
+        if target_t:
+            baseline_val = (
+                float(df[target_t].mean()) if target_t in df.columns else 0.05
+            )
+            candidate_policies["conservative_baseline"] = {
+                target_t: round(baseline_val, 3)
+            }
+            candidate_policies["aggressive_growth"] = {
+                target_t: round(baseline_val * 1.5, 3)
+            }
+
+        # Add epistemic policy if unverified edges exist
+        for edge in report.edges:
+            if edge.edge_type != "EXTRACTED":
+                candidate_policies["epistemic_probe"] = {edge.source: 1.0}
+                break
+
+        if candidate_policies:
+            try:
+                plan = agent.plan(
+                    candidate_interventions=candidate_policies,
+                    target_outcome=target_y,
+                    desired_value=target_val,
+                    df=df,
+                )
+                min_efe = (
+                    plan.optimal_policy.expected_free_energy
+                    if plan.optimal_policy
+                    else 0.0
+                )
+                opt_name = (
+                    plan.optimal_policy.policy_name if plan.optimal_policy else "None"
+                )
+
+                console.print(
+                    Panel(
+                        f"[bold]Target Setpoint:[/bold] {target_y} = {target_val:.2f}\n"
+                        f"[bold cyan]Optimal Policy Selected:[/bold cyan] {opt_name}\n"
+                        f"[bold]Min Expected Free Energy (G):[/bold] {min_efe:.3f}\n"
+                        f"{plan.agent_rationale}",
+                        title="🧠 Pass 6: Active Inference EFE Policy Optimization",
+                        border_style="cyan",
+                    )
+                )
+            except Exception as e:
+                console.print(
+                    f"[dim yellow]⚠ Pass 6 Active Inference skipped: {e}[/dim yellow]"
+                )
+
+    console.print(
+        "[bold green]✔ CIG pipeline execution complete. Artifacts ready.[/bold green]"
+    )
+
+
 if __name__ == "__main__":
     main()

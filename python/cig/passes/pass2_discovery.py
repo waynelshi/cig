@@ -93,7 +93,10 @@ class CausalDiscoveryEngine:
 
         # Step 1: Initialize fully connected undirected skeleton
         adj_candidates: dict[tuple[str, str], tuple[float, float, list[str]]] = {}
-        for x, y in itertools.combinations(cols, 2):
+        # Filter out columns with zero variance
+        valid_cols = [c for c in cols if df[c].dropna().std() > 1e-12]
+
+        for x, y in itertools.combinations(valid_cols, 2):
             r, p_val = stats.pearsonr(df[x].dropna(), df[y].dropna())
             if p_val < self.alpha:
                 adj_candidates[(x, y)] = (float(r), float(p_val), [])
