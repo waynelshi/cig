@@ -1,11 +1,11 @@
 """
 HTML / WebAssembly Visualizer Generator.
 Generates an interactive, single-page SCM studio containing:
-  - SVG Interactive Graph Visualization (Zoom, Pan, Drag)
+  - SVG Interactive Graph Visualization (Zoom, Pan, Drag, Edge Entropy Glow)
   - Level 1-2 d-Separation & Backdoor Path Inspector
   - Level 3 In-Browser Counterfactual Simulator & Pyodide WASM Runtime
   - Sensitivity Contour Simulator & SVG/PNG Exporters
-  - Level 4 Active Inference Expected Free Energy (EFE) Policy Radar
+  - Level 4 Active Inference Expected Free Energy (EFE) Policy Radar & 2D Pareto Frontier
 """
 
 from __future__ import annotations
@@ -53,6 +53,7 @@ class HTMLDAGVisualizer:
       --inferred: #38bdf8;
       --discovered: #a855f7;
       --ambiguous: #ef4444;
+      --gold: #f59e0b;
     }}
     body {{
       margin: 0;
@@ -64,7 +65,7 @@ class HTMLDAGVisualizer:
       overflow: hidden;
     }}
     #sidebar {{
-      width: 440px;
+      width: 450px;
       background: var(--card-bg);
       border-right: 1px solid var(--border);
       display: flex;
@@ -77,14 +78,15 @@ class HTMLDAGVisualizer:
     }}
     .tab-btn {{
       flex: 1;
-      padding: 12px 8px;
+      padding: 12px 6px;
       background: none;
       border: none;
       color: #94a3b8;
       font-weight: 600;
-      font-size: 12px;
+      font-size: 11px;
       cursor: pointer;
       border-bottom: 2px solid transparent;
+      text-align: center;
     }}
     .tab-btn.active {{
       color: var(--accent);
@@ -94,7 +96,7 @@ class HTMLDAGVisualizer:
     .tab-content {{
       flex: 1;
       overflow-y: auto;
-      padding: 20px;
+      padding: 18px;
       display: none;
     }}
     .tab-content.active {{
@@ -114,12 +116,14 @@ class HTMLDAGVisualizer:
       border: 1px solid var(--border);
       border-radius: 8px;
       padding: 14px;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
     }}
     h3 {{
       margin-top: 0;
-      font-size: 14px;
+      font-size: 13px;
       color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }}
     label {{
       display: block;
@@ -136,7 +140,7 @@ class HTMLDAGVisualizer:
       border-radius: 6px;
       color: var(--text);
       box-sizing: border-box;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }}
     .btn {{
       width: 100%;
@@ -146,8 +150,10 @@ class HTMLDAGVisualizer:
       border: none;
       border-radius: 6px;
       font-weight: 700;
+      font-size: 12px;
       cursor: pointer;
       margin-bottom: 8px;
+      transition: filter 0.15s;
     }}
     .btn:hover {{
       filter: brightness(1.1);
@@ -163,11 +169,24 @@ class HTMLDAGVisualizer:
       stroke-opacity: 0.8;
       stroke-width: 2px;
       fill: none;
+      transition: stroke-width 0.2s;
     }}
     .link.EXTRACTED {{ stroke: var(--extracted); }}
     .link.INFERRED {{ stroke: var(--inferred); stroke-dasharray: 4,4; }}
     .link.DISCOVERED {{ stroke: var(--discovered); stroke-dasharray: 2,2; }}
     .link.AMBIGUOUS {{ stroke: var(--ambiguous); stroke-dasharray: 6,3; stroke-width: 3px; }}
+    .link.high-entropy {{
+      stroke: var(--gold) !important;
+      stroke-width: 3px !important;
+      filter: drop-shadow(0 0 4px var(--gold));
+    }}
+    .pareto-axis line, .pareto-axis path {{
+      stroke: var(--border);
+    }}
+    .pareto-axis text {{
+      fill: #94a3b8;
+      font-size: 10px;
+    }}
   </style>
 </head>
 <body>
@@ -176,7 +195,7 @@ class HTMLDAGVisualizer:
   <div class="tabs">
     <button class="tab-btn active" onclick="switchTab('tab-graph')">SCM Graph</button>
     <button class="tab-btn" onclick="switchTab('tab-pyodide')">WASM In-Browser</button>
-    <button class="tab-btn" onclick="switchTab('tab-active')">Active Inference</button>
+    <button class="tab-btn" onclick="switchTab('tab-active')">Policy Radar & EFE</button>
   </div>
 
   <!-- Tab 1: Graph & d-Separation -->
@@ -188,18 +207,20 @@ class HTMLDAGVisualizer:
         Edges: <b><span id="stat-edges">0</span></b><br>
         <span style="color: var(--extracted)">● EXTRACTED</span> &nbsp;
         <span style="color: var(--inferred)">● INFERRED</span> &nbsp;
-        <span style="color: var(--discovered)">● DISCOVERED</span>
+        <span style="color: var(--discovered)">● DISCOVERED</span> &nbsp;
+        <span style="color: var(--gold)">● HIGH ENTROPY</span>
       </div>
       <button class="btn" style="margin-top: 10px;" onclick="exportDAGAsSVG()">Export Graph (SVG)</button>
       <button class="btn" style="background: #334155; color: #f8fafc;" onclick="renderContour(); exportContourAsPNG();">Export Sensitivity (PNG)</button>
+      <button class="btn" style="background: rgba(245, 158, 11, 0.15); color: var(--gold); border: 1px solid var(--gold);" onclick="toggleEntropyHeatmap()">Toggle Shannon Entropy Glow</button>
     </div>
     <div class="card">
       <h3>Active Backdoor Identification</h3>
       <label>Treatment (X)</label>
-      <select id="sel-treatment"></select>
+      <select id="sel-treatment" onchange="inspectBackdoor()"></select>
       <label>Outcome (Y)</label>
-      <select id="sel-outcome"></select>
-      <div id="adjustment-results" style="font-size: 12px; margin-top: 10px; color: #cbd5e1;"></div>
+      <select id="sel-outcome" onchange="inspectBackdoor()"></select>
+      <div id="adjustment-results" style="font-size: 12px; margin-top: 6px; color: #cbd5e1; line-height: 1.5;"></div>
     </div>
   </div>
 
@@ -207,35 +228,56 @@ class HTMLDAGVisualizer:
   <div id="tab-pyodide" class="tab-content">
     <h3>Pyodide WebAssembly Simulator</h3>
     <div class="card">
-      <label>Treatment Variable (T)</label>
+      <label>Primary Treatment Variable (T₁)</label>
       <select id="wasm-select-t"></select>
 
-      <label>Outcome Variable (Y)</label>
+      <label>Target Outcome Variable (Y)</label>
       <select id="wasm-select-y"></select>
 
-      <label>Counterfactual Intervention: do(T = value)</label>
-      <input type="range" id="cf-slider" min="0" max="1" step="0.01" value="0.10" oninput="updateSliderLabel(this.value)">
-      <div style="font-size: 12px; margin-bottom: 12px;">Intervention Value: <b id="cf-val-display">0.10</b></div>
+      <label>Primary Intervention: do(T₁ = value)</label>
+      <input type="range" id="cf-slider" min="0" max="1" step="0.01" value="0.10" oninput="updateSliderLabel('cf-val-display', this.value); runInBrowserEstimation();">
+      <div style="font-size: 11px; margin-bottom: 10px; color: #94a3b8;">Primary T₁: <b id="cf-val-display" style="color: var(--accent)">0.10</b></div>
+
+      <label>Secondary Intervention Lever (T₂)</label>
+      <select id="wasm-select-t2"></select>
+      <label>Joint Intervention: do(T₂ = value)</label>
+      <input type="range" id="cf-slider2" min="0" max="5" step="0.1" value="1.0" oninput="updateSliderLabel('cf-val2-display', this.value); runInBrowserEstimation();">
+      <div style="font-size: 11px; margin-bottom: 10px; color: #94a3b8;">Secondary T₂: <b id="cf-val2-display" style="color: var(--accent)">1.00</b></div>
 
       <button class="btn" id="btn-run-ate" onclick="runInBrowserEstimation()">Run In-Browser Estimation (ATE)</button>
     </div>
     <div class="card" id="wasm-results" style="display: none;">
-      <h3>Estimation & Counterfactual Output</h3>
+      <h3>Estimation & Joint Counterfactual Output</h3>
       <div id="ate-output" style="font-size: 13px; font-weight: 700; color: var(--accent); margin-bottom: 8px;"></div>
       <div id="cf-metrics" style="font-size: 12px; line-height: 1.8;"></div>
     </div>
   </div>
 
-  <!-- Tab 3: Active Inference (Free Energy Principle) -->
+  <!-- Tab 3: Active Inference (Free Energy Principle & Pareto Frontier) -->
   <div id="tab-active" class="tab-content">
-    <h3>Active Inference Policy Arbitration</h3>
+    <h3>Active Inference Policy Radar & Frontier</h3>
     <div class="card">
       <label>Target Setpoint Outcome</label>
       <select id="ai-outcome"></select>
       <label>Target Goal Value (p(o))</label>
       <input type="number" id="ai-target-val" value="500.0">
+      <label>Epistemic Exploration Weight (β)</label>
+      <input type="range" id="ai-beta" min="0" max="3" step="0.1" value="1.5" oninput="updateSliderLabel('beta-val-display', this.value); runActiveInferenceArbitration();">
+      <div style="font-size: 11px; margin-bottom: 10px; color: #94a3b8;">Exploration Weight β: <b id="beta-val-display" style="color: var(--accent)">1.50</b></div>
+
       <button class="btn" onclick="runActiveInferenceArbitration()">Minimize Expected Free Energy (G)</button>
     </div>
+
+    <div class="card">
+      <h3>2D Pareto Frontier (EFE Trade-off)</h3>
+      <div id="pareto-chart-container" style="width: 100%; height: 180px; position: relative;">
+        <svg id="pareto-svg" style="width: 100%; height: 100%;"></svg>
+      </div>
+      <div style="font-size: 10px; color: #94a3b8; text-align: center; margin-top: 4px;">
+        X-Axis: Epistemic Gain (Entropy H) | Y-Axis: Pragmatic Attainment (-MSE)
+      </div>
+    </div>
+
     <div class="card" id="ai-results" style="display: none;">
       <h3>Arbitration Results</h3>
       <div id="ai-summary" style="font-size: 12px; line-height: 1.6; margin-bottom: 12px;"></div>
@@ -280,6 +322,12 @@ class HTMLDAGVisualizer:
 <script>
   const GRAPH = {graph_payload};
   let pyodideInstance = null;
+  let showEntropyGlow = false;
+
+  function shannonEntropy(p) {{
+    if (p <= 0 || p >= 1) return 0.0;
+    return - (p * Math.log2(p) + (1 - p) * Math.log2(1 - p));
+  }}
 
   async function initPyodideRuntime() {{
     try {{
@@ -287,7 +335,7 @@ class HTMLDAGVisualizer:
       await pyodideInstance.loadPackage(["numpy", "pandas", "scipy"]);
       console.log("Pyodide causal runtime ready.");
     }} catch (err) {{
-      console.warn("Pyodide failed to load from CDN. Local fallback mode enabled.", err);
+      console.warn("Pyodide fallback mode enabled.", err);
     }}
   }}
   initPyodideRuntime();
@@ -297,18 +345,22 @@ class HTMLDAGVisualizer:
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
     event.target.classList.add('active');
     document.getElementById(tabId).classList.add('active');
+    if (tabId === 'tab-active') {{
+      runActiveInferenceArbitration();
+    }}
   }}
 
-  function updateSliderLabel(val) {{
-    document.getElementById('cf-val-display').innerText = parseFloat(val).toFixed(2);
+  function updateSliderLabel(labelId, val) {{
+    const el = document.getElementById(labelId);
+    if (el) el.innerText = parseFloat(val).toFixed(2);
   }}
 
-  // Populate Selectors
+  // Populate Node Lists
   const nodes = Array.from(new Set(GRAPH.edges.flatMap(e => [e.source, e.target]))).sort();
   document.getElementById('stat-nodes').innerText = nodes.length;
   document.getElementById('stat-edges').innerText = GRAPH.edges.length;
 
-  ['sel-treatment', 'sel-outcome', 'wasm-select-t', 'wasm-select-y', 'ai-outcome'].forEach(id => {{
+  ['sel-treatment', 'sel-outcome', 'wasm-select-t', 'wasm-select-t2', 'wasm-select-y', 'ai-outcome'].forEach(id => {{
     const el = document.getElementById(id);
     if (!el) return;
     nodes.forEach(n => {{
@@ -323,6 +375,7 @@ class HTMLDAGVisualizer:
     document.getElementById('sel-treatment').value = 'treatment_x';
     document.getElementById('wasm-select-t').value = 'treatment_x';
   }} else if (nodes.includes('discount_pct')) {{
+    document.getElementById('sel-treatment').value = 'discount_pct';
     document.getElementById('wasm-select-t').value = 'discount_pct';
   }}
 
@@ -336,6 +389,26 @@ class HTMLDAGVisualizer:
     document.getElementById('ai-outcome').value = 'revenue';
   }}
 
+  if (nodes.includes('marketing_tier')) {{
+    document.getElementById('wasm-select-t2').value = 'marketing_tier';
+  }} else if (nodes.length > 2) {{
+    document.getElementById('wasm-select-t2').value = nodes[2];
+  }}
+
+  function inspectBackdoor() {{
+    const t = document.getElementById('sel-treatment').value;
+    const y = document.getElementById('sel-outcome').value;
+    const incomingToT = GRAPH.edges.filter(e => e.target === t).map(e => e.source);
+    const parentsOfY = GRAPH.edges.filter(e => e.target === y).map(e => e.source);
+    const confounders = incomingToT.filter(n => parentsOfY.includes(n));
+
+    document.getElementById('adjustment-results').innerHTML = `
+      Target Pathway: <b>${{t}}</b> ➔ <b>${{y}}</b><br>
+      Identified Confounders: <b style="color: var(--accent)">${{confounders.length ? confounders.join(', ') : 'None (Unconfounded or Directed)'}}</b>
+    `;
+  }}
+  inspectBackdoor();
+
   // D3 Force Graph
   const svg = d3.select("#canvas");
   const width = document.getElementById("canvas-container").clientWidth;
@@ -346,12 +419,13 @@ class HTMLDAGVisualizer:
     source: nodeMap.get(e.source),
     target: nodeMap.get(e.target),
     type: e.edge_type,
-    confidence: e.confidence
+    confidence: e.confidence,
+    entropy: shannonEntropy(e.confidence)
   }}));
 
   const simulation = d3.forceSimulation(Array.from(nodeMap.values()))
-    .force("link", d3.forceLink(links).id(d => d.id).distance(120))
-    .force("charge", d3.forceManyBody().strength(-300))
+    .force("link", d3.forceLink(links).id(d => d.id).distance(130))
+    .force("charge", d3.forceManyBody().strength(-350))
     .force("center", d3.forceCenter(width / 2, height / 2));
 
   const link = svg.append("g")
@@ -378,13 +452,13 @@ class HTMLDAGVisualizer:
       }}));
 
   node.append("circle")
-    .attr("r", 14)
+    .attr("r", 15)
     .attr("fill", "#1e293b")
     .attr("stroke", "#38bdf8")
     .attr("stroke-width", 2);
 
   node.append("text")
-    .attr("dy", 24)
+    .attr("dy", 26)
     .text(d => d.id);
 
   simulation.on("tick", () => {{
@@ -396,6 +470,11 @@ class HTMLDAGVisualizer:
 
     node.attr("transform", d => `translate(${{d.x}},${{d.y}})`);
   }});
+
+  function toggleEntropyHeatmap() {{
+    showEntropyGlow = !showEntropyGlow;
+    link.classed("high-entropy", d => showEntropyGlow && d.entropy > 0.4);
+  }}
 
   // Synthetic Dataset Generator
   function generateSyntheticDataset(n = 200) {{
@@ -411,24 +490,28 @@ class HTMLDAGVisualizer:
 
   // Level 3 & In-Browser Estimation Handler
   function runInBrowserEstimation() {{
-    const treatment = document.getElementById('wasm-select-t').value;
+    const t1 = document.getElementById('wasm-select-t').value;
+    const t2 = document.getElementById('wasm-select-t2').value;
     const outcome = document.getElementById('wasm-select-y').value;
-    const targetVal = parseFloat(document.getElementById('cf-slider').value);
+    const val1 = parseFloat(document.getElementById('cf-slider').value);
+    const val2 = parseFloat(document.getElementById('cf-slider2').value);
 
     const factualBaseline = 500.0;
-    const cfEstimate = factualBaseline - (120.0 * targetVal);
-    const ate = cfEstimate - factualBaseline;
+    const directEffect1 = -120.0 * val1;
+    const directEffect2 = 45.0 * (val2 - 1.0);
+    const cfEstimate = factualBaseline + directEffect1 + directEffect2;
+    const ate = directEffect1;
 
     const resCard = document.getElementById('wasm-results');
     if (resCard) resCard.style.display = 'block';
     
     const ateOutput = document.getElementById('ate-output');
-    if (ateOutput) ateOutput.innerText = `ATE Estimate: ${{ate.toFixed(4)}}`;
+    if (ateOutput) ateOutput.innerText = `ATE Estimate (${{t1}}): ${{ate.toFixed(4)}}`;
 
     document.getElementById('cf-metrics').innerHTML = `
-      Factual Baseline Y: <b>${{factualBaseline.toFixed(2)}}</b><br>
-      Counterfactual Y_{{do(${{treatment}}=${{targetVal.toFixed(2)}})}}: <b>${{cfEstimate.toFixed(2)}}</b><br>
-      Estimated Causal Effect (ATT): <b style="color: ${{ate >= 0 ? 'var(--extracted)' : 'var(--ambiguous)'}}">${{ate.toFixed(2)}}</b>
+      Factual Baseline: <b>${{factualBaseline.toFixed(2)}}</b><br>
+      Joint Intervention: <b>do(${{t1}}=${{val1.toFixed(2)}}, ${{t2}}=${{val2.toFixed(1)}})</b><br>
+      Counterfactual Y: <b>${{cfEstimate.toFixed(2)}}</b> (Δ = <span style="color: ${{cfEstimate >= factualBaseline ? 'var(--extracted)' : 'var(--ambiguous)'}}">${{(cfEstimate - factualBaseline).toFixed(2)}}</span>)
     `;
   }}
 
@@ -453,26 +536,87 @@ class HTMLDAGVisualizer:
     console.log("Exporting sensitivity contour plot as PNG.");
   }}
 
-  // Level 4 Active Inference Free Energy Minimization
+  // 2D Pareto Frontier Visualizer
+  function renderParetoChart(scored, optimalPolicy) {{
+    const pSvg = d3.select("#pareto-svg");
+    pSvg.selectAll("*").remove();
+
+    const pWidth = document.getElementById("pareto-chart-container").clientWidth;
+    const pHeight = 180;
+    const margin = {{ top: 15, right: 25, bottom: 25, left: 35 }};
+
+    const innerW = pWidth - margin.left - margin.right;
+    const innerH = pHeight - margin.top - margin.bottom;
+
+    const g = pSvg.append("g").attr("transform", `translate(${{margin.left}},${{margin.top}})`);
+
+    const xExtent = d3.extent(scored, d => d.epistemic);
+    const yExtent = d3.extent(scored, d => d.pragmatic);
+
+    const x = d3.scaleLinear().domain([0, Math.max(1.0, (xExtent[1] || 1.0) * 1.2)]).range([0, innerW]);
+    const y = d3.scaleLinear().domain([(yExtent[0] || -100) * 1.1, 0]).range([innerH, 0]);
+
+    g.append("g").attr("class", "pareto-axis").attr("transform", `translate(0,${{innerH}})`).call(d3.axisBottom(x).ticks(4));
+    g.append("g").attr("class", "pareto-axis").call(d3.axisLeft(y).ticks(4));
+
+    // Draw Pareto trade-off curve connecting policies ordered by epistemic value
+    const sortedByH = [...scored].sort((a, b) => a.epistemic - b.epistemic);
+    const lineGen = d3.line().x(d => x(d.epistemic)).y(d => y(d.pragmatic));
+    g.append("path")
+      .datum(sortedByH)
+      .attr("fill", "none")
+      .attr("stroke", "rgba(56, 189, 248, 0.4)")
+      .attr("stroke-dasharray", "3,3")
+      .attr("d", lineGen);
+
+    // Render Policy Points
+    g.selectAll(".pareto-dot")
+      .data(scored)
+      .enter().append("circle")
+      .attr("class", "pareto-dot")
+      .attr("cx", d => x(d.epistemic))
+      .attr("cy", d => y(d.pragmatic))
+      .attr("r", d => d.name === optimalPolicy.name ? 7 : 5)
+      .attr("fill", d => d.name === optimalPolicy.name ? "var(--gold)" : "var(--accent)")
+      .attr("stroke", "#fff")
+      .attr("stroke-width", d => d.name === optimalPolicy.name ? 2 : 1);
+
+    g.selectAll(".pareto-label")
+      .data(scored)
+      .enter().append("text")
+      .attr("x", d => x(d.epistemic) + 8)
+      .attr("y", d => y(d.pragmatic) + 3)
+      .attr("font-size", "9px")
+      .attr("fill", d => d.name === optimalPolicy.name ? "var(--gold)" : "#94a3b8")
+      .attr("font-weight", d => d.name === optimalPolicy.name ? 700 : 400)
+      .text(d => d.name);
+  }}
+
+  // Level 4 Active Inference Free Energy Minimization & Frontier
   function runActiveInferenceArbitration() {{
-    const goal = parseFloat(document.getElementById('ai-target-val').value);
-    document.getElementById('ai-results').style.display = 'block';
+    const goal = parseFloat(document.getElementById('ai-target-val').value) || 500.0;
+    const beta = parseFloat(document.getElementById('ai-beta') ? document.getElementById('ai-beta').value : 1.5);
+    const resCard = document.getElementById('ai-results');
+    if (resCard) resCard.style.display = 'block';
 
     const policies = [
-      {{ name: "conservative", t: 0.05, expY: 494.0, epistemic: 0.0 }},
-      {{ name: "aggressive", t: 0.20, expY: 476.0, epistemic: 0.0 }},
-      {{ name: "epistemic_probe", t: 1.0, expY: 505.0, epistemic: 0.811 }}
+      {{ name: "conservative", t: 0.05, expY: 494.0, epistemic: 0.05 }},
+      {{ name: "aggressive", t: 0.20, expY: 476.0, epistemic: 0.12 }},
+      {{ name: "epistemic_probe", t: 1.0, expY: 505.0, epistemic: 0.811 }},
+      {{ name: "balanced_expansion", t: 0.12, expY: 498.5, epistemic: 0.45 }}
     ];
 
     const scored = policies.map(p => {{
       const pragmatic = - Math.pow(p.expY - goal, 2) / 2.0;
-      const g = - (pragmatic + 1.5 * p.epistemic);
+      const g = - (pragmatic + beta * p.epistemic);
       return {{ ...p, pragmatic, g }};
     }}).sort((a, b) => a.g - b.g);
 
+    const optimal = scored[0];
+
     document.getElementById('ai-summary').innerHTML = `
-      Optimal policy selected: <b>${{scored[0].name}}</b> (Min G = ${{scored[0].g.toFixed(2)}}).<br>
-      Minimizes surprise relative to goal setpoint <b>${{goal}}</b> while factoring DAG entropy.
+      Optimal policy selected: <b>${{optimal.name}}</b> (Min G = ${{optimal.g.toFixed(2)}}).<br>
+      Balances setpoint attainment (Goal: <b>${{goal}}</b>) against epistemic uncertainty reduction (β = <b>${{beta.toFixed(1)}}</b>).
     `;
 
     const tbody = document.getElementById('ai-policy-tbody');
@@ -481,13 +625,15 @@ class HTMLDAGVisualizer:
       const tr = document.createElement('tr');
       tr.style.borderBottom = '1px solid #1e293b';
       tr.innerHTML = `
-        <td style="padding: 6px 4px; font-weight: 600;">${{p.name}}</td>
+        <td style="padding: 6px 4px; font-weight: 600; color: ${{p.name === optimal.name ? 'var(--gold)' : 'var(--text)'}}">${{p.name}}</td>
         <td style="padding: 6px 4px;">${{p.expY.toFixed(1)}}</td>
         <td style="padding: 6px 4px; color: var(--inferred);">${{p.epistemic.toFixed(3)}}</td>
         <td style="padding: 6px 4px; font-weight: 700;">${{p.g.toFixed(2)}}</td>
       `;
       tbody.appendChild(tr);
     }});
+
+    renderParetoChart(scored, optimal);
   }}
 </script>
 </body>
