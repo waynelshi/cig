@@ -232,7 +232,7 @@ class PythonLineageParser:
 
 
 class DBTManifestParser:
-    """Parses dbt target/manifest.json to extract deterministic table and column lineages."""
+    """Parses dbt target/manifest.json to extract table, column, and metric lineages."""
 
     def __init__(self, sql_parser: SQLLineageParser | None = None):
         self.sql_parser = sql_parser or SQLLineageParser()
@@ -243,7 +243,11 @@ class DBTManifestParser:
         edges: list[ExtractedEdge] = []
         nodes = manifest.get("nodes", {})
         parent_map = manifest.get("parent_map", {})
+        sources = manifest.get("sources", {})
+        metrics = manifest.get("metrics", {})
+        semantic_models = manifest.get("semantic_models", {})
 
+        # 1. Model and Column Lineages
         for node_id, node_info in nodes.items():
             resource_type = node_info.get("resource_type")
             if resource_type not in ("model", "snapshot", "seed"):
@@ -253,12 +257,10 @@ class DBTManifestParser:
             if not target_model_name:
                 continue
 
-            # 1. Table-level model lineages from parent_map
+            # Table-level dependencies
             parents = parent_map.get(node_id, [])
             for parent_id in parents:
-                parent_info = nodes.get(parent_id) or manifest.get("sources", {}).get(
-                    parent_id, {}
-                )
+                parent_info = nodes.get(parent_id) or sources.get(parent_id, {})
                 parent_name = (
                     parent_info.get("alias")
                     or parent_info.get("name")
@@ -275,7 +277,7 @@ class DBTManifestParser:
                     )
                 )
 
-            # 2. Column-level lineages via compiled SQL (if present)
+            # Column-level lineages via compiled SQL
             compiled_code = (
                 node_info.get("compiled_code")
                 or node_info.get("compiled_sql")
@@ -288,7 +290,6 @@ class DBTManifestParser:
                         provenance=f"{node_info.get('original_file_path', provenance)}",
                     )
                     for ce in col_edges:
-                        # Prefix target with model name if unqualified
                         target_col = ce.target
                         if "." not in target_col:
                             target_col = f"{target_model_name}.{target_col}"
@@ -305,6 +306,53 @@ class DBTManifestParser:
                 except Exception:
                     pass
 
+        # 2. Semantic Models & Metrics Layer
+        for metric_id, m_info in metrics.items():
+            metric_name = m_info.get("name", metric_id.split(".")[-1])
+            # Direct calculation formulas (e.g. type_params.measure or calculation_method)
+            type_params = m_info.get("type_params", {})
+            measure = type_params.get("measure")
+            if isinstance(measure, str):
+                edges.append(
+                    ExtractedEdge(
+                        source=measure,
+                        target=metric_name,
+                        edge_type="EXTRACTED",
+                        confidence=1.0,
+                        provenance=f"{provenance} (metric: {metric_name})",
+                        expression=f"metric: {m_info.get('type', 'derived')}",
+                    )
+                )
+            elif isinstance(measure, dict):
+                m_name = measure.get("name")
+                if m_name:
+                    edges.append(
+                        ExtractedEdge(
+                            source=m_name,
+                            target=metric_name,
+                            edge_type="EXTRACTED",
+                            confidence=1.0,
+                            provenance=f"{provenance} (metric: {metric_name})",
+                            expression=f"metric: {m_info.get('type', 'derived')}",
+                        )
+                    )
+
+            # Input metrics for derived metrics
+            input_metrics = type_params.get("metrics", [])
+            for im in input_metrics:
+                im_name = im.get("name") if isinstance(im, dict) else str(im)
+                if im_name:
+                    edges.append(
+                        ExtractedEdge(
+                            source=im_name,
+                            target=metric_name,
+                            edge_type="EXTRACTED",
+                            confidence=1.0,
+                            provenance=f"{provenance} (derived_metric: {metric_name})",
+                            expression=f"derived from {im_name}",
+                        )
+                    )
+
         return edges
 
     def parse_file(self, file_path: str | Path) -> list[ExtractedEdge]:
@@ -314,3 +362,67 @@ class DBTManifestParser:
         with open(path, "r", encoding="utf-8") as f:
             manifest_data = json.load(f)
         return self.parse_manifest_dict(manifest_data, provenance=str(path))
+
+
+class SQLMeshManifestParser:
+    """Parses SQLMesh models or context state to extract deterministic DAG lineages."""
+
+    def __init__(self, sql_parser: SQLLineageParser | None = None):
+        self.sql_parser = sql_parser or SQLLineageParser()
+
+    def parse_manifest_dict(
+        self, state_dict: dict, provenance: str = "sqlmesh_manifest.json"
+    ) -> list[ExtractedEdge]:
+        edges: list[ExtractedEdge] = []
+        models = state_dict.get("models", {})
+
+        for model_key, model_meta in models.items():
+            model_name = model_meta.get("name", model_key)
+            query = model_meta.get("query") or model_meta.get("definition")
+            depends_on = model_meta.get("depends_on", [])
+
+            # Table-level edges
+            for dep in depends_on:
+                edges.append(
+                    ExtractedEdge(
+                        source=dep,
+                        target=model_name,
+                        edge_type="EXTRACTED",
+                        confidence=1.0,
+                        provenance=provenance,
+                        expression="sqlmesh depends_on",
+                    )
+                )
+
+            # Column-level edges from query if present
+            if query and isinstance(query, str):
+                try:
+                    col_edges = self.sql_parser.parse_query(
+                        query, provenance=f"{provenance} ({model_name})"
+                    )
+                    for ce in col_edges:
+                        tgt = ce.target
+                        if "." not in tgt:
+                            tgt = f"{model_name}.{tgt}"
+                        edges.append(
+                            ExtractedEdge(
+                                source=ce.source,
+                                target=tgt,
+                                edge_type="EXTRACTED",
+                                confidence=1.0,
+                                provenance=ce.provenance,
+                                expression=ce.expression,
+                            )
+                        )
+                except Exception:
+                    pass
+
+        return edges
+
+    def parse_file(self, file_path: str | Path) -> list[ExtractedEdge]:
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"SQLMesh manifest not found: {path}")
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return self.parse_manifest_dict(data, provenance=str(path))

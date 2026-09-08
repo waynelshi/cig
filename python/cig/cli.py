@@ -21,8 +21,10 @@ from cig.artifacts.graphml_exporter import GraphMLExporter
 from cig.artifacts.visualizer import HTMLDAGVisualizer
 from cig.passes.pass1_lineage import (
     DBTManifestParser,
+    ExtractedEdge,
     PythonLineageParser,
     SQLLineageParser,
+    SQLMeshManifestParser,
 )
 from cig.passes.pass2_semantic import (
     DBTSchemaDocExtractor,
@@ -686,6 +688,13 @@ def active_inference_cmd(outcome: str, target_val: float, data: str, graph: str 
 @main.command(name="run")
 @click.argument("path", default=".", type=click.Path(exists=True, file_okay=False))
 @click.option(
+    "--manifest",
+    "-m",
+    type=click.Path(exists=True, file_okay=True),
+    default=None,
+    help="Path to dbt manifest.json or SQLMesh state JSON",
+)
+@click.option(
     "--data",
     "-d",
     type=click.Path(exists=True, file_okay=True),
@@ -713,6 +722,7 @@ def active_inference_cmd(outcome: str, target_val: float, data: str, graph: str 
 )
 def run_pipeline_cmd(
     path: str,
+    manifest: str | None,
     data: str | None,
     treatment: str | None,
     outcome: str | None,
@@ -733,6 +743,25 @@ def run_pipeline_cmd(
     dbt_manifest_parser = DBTManifestParser(sql_parser=sql_parser)
     dbt_doc_extractor = DBTSchemaDocExtractor()
     semantic_extractor = SemanticCausalExtractor()
+
+    if manifest:
+        m_path = Path(manifest)
+        try:
+            m_data = json.loads(m_path.read_text(encoding="utf-8"))
+            if "models" in m_data and "nodes" not in m_data:
+                m_edges = SQLMeshManifestParser().parse_manifest_dict(
+                    m_data, provenance=str(m_path)
+                )
+            else:
+                m_edges = DBTManifestParser().parse_manifest_dict(
+                    m_data, provenance=str(m_path)
+                )
+            unifier.add_extracted_edges(m_edges)
+            console.print(
+                f"[bold green]✔ Ingested {len(m_edges)} lineage edges from manifest:[/bold green] {m_path.name}"
+            )
+        except Exception as ex:
+            console.print(f"[yellow]⚠ Failed parsing manifest {m_path}: {ex}[/yellow]")
 
     # Pass 1: Lineage Extraction
     for mf in base_path.rglob("manifest.json"):
@@ -1060,6 +1089,13 @@ def policy_cmd(data: str, treatment: str, outcome: str, max_depth: int):
 @main.command(name="check")
 @click.argument("path", default=".", type=click.Path(exists=True, file_okay=False))
 @click.option(
+    "--manifest",
+    "-m",
+    type=click.Path(exists=True, file_okay=True),
+    default=None,
+    help="Path to dbt manifest.json or SQLMesh state JSON",
+)
+@click.option(
     "--data",
     "-d",
     type=click.Path(exists=True, file_okay=True),
@@ -1092,6 +1128,7 @@ def policy_cmd(data: str, treatment: str, outcome: str, max_depth: int):
 )
 def check_cmd(
     path: str,
+    manifest: str | None,
     data: str | None,
     treatment: str,
     outcome: str,
@@ -1110,6 +1147,25 @@ def check_cmd(
     unifier = SCMGraphUnification()
     sql_parser = SQLLineageParser()
     py_parser = PythonLineageParser()
+
+    if manifest:
+        m_path = Path(manifest)
+        try:
+            m_data = json.loads(m_path.read_text(encoding="utf-8"))
+            if "models" in m_data and "nodes" not in m_data:
+                m_edges = SQLMeshManifestParser().parse_manifest_dict(
+                    m_data, provenance=str(m_path)
+                )
+            else:
+                m_edges = DBTManifestParser().parse_manifest_dict(
+                    m_data, provenance=str(m_path)
+                )
+            unifier.add_extracted_edges(m_edges)
+            console.print(
+                f"[bold green]✔ Ingested {len(m_edges)} lineage edges from manifest:[/bold green] {m_path.name}"
+            )
+        except Exception as ex:
+            console.print(f"[yellow]⚠ Failed parsing manifest {m_path}: {ex}[/yellow]")
 
     for sf in base_path.rglob("*.sql"):
         if ".venv" not in sf.parts and ".cig" not in sf.parts:
