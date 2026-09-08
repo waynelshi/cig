@@ -881,7 +881,7 @@ def run_pipeline_cmd(
         estimator = CausalEstimationEngine(engine)
         try:
             summary = estimator.estimate_effect(
-                df, treatment=target_t, outcome=target_y
+                df, treatment=target_t, outcome=target_y, run_refutations=False
             )
             sens = estimator.compute_sensitivity_analysis(
                 df, treatment=target_t, outcome=target_y

@@ -206,6 +206,55 @@ class CausalEstimationEngine:
                 ci = None
             return ate, ci
 
+    def _build_minimal_gml(
+        self,
+        treatment: str,
+        outcome: str,
+        adjustment_set: list[str],
+        strategy: str,
+    ) -> str:
+        """Builds an induced minimal GML graph containing only target variables."""
+        nodes = list(dict.fromkeys([treatment, outcome] + adjustment_set))
+        node_map = {name: idx for idx, name in enumerate(nodes)}
+
+        lines = ["graph [", "  directed 1"]
+        for idx, name in enumerate(nodes):
+            lines.append(f'  node [ id {idx} label "{name}" ]')
+
+        if strategy == "instrumental_variable" and adjustment_set:
+            # Z -> T -> Y
+            inst = adjustment_set[0]
+            lines.append(
+                f"  edge [ source {node_map[inst]} target {node_map[treatment]} ]"
+            )
+            lines.append(
+                f"  edge [ source {node_map[treatment]} target {node_map[outcome]} ]"
+            )
+        elif strategy == "frontdoor" and adjustment_set:
+            # T -> M -> Y
+            med = adjustment_set[0]
+            lines.append(
+                f"  edge [ source {node_map[treatment]} target {node_map[med]} ]"
+            )
+            lines.append(
+                f"  edge [ source {node_map[med]} target {node_map[outcome]} ]"
+            )
+        else:
+            # Backdoor adjustment: W -> T, W -> Y, T -> Y
+            lines.append(
+                f"  edge [ source {node_map[treatment]} target {node_map[outcome]} ]"
+            )
+            for w in adjustment_set:
+                lines.append(
+                    f"  edge [ source {node_map[w]} target {node_map[treatment]} ]"
+                )
+                lines.append(
+                    f"  edge [ source {node_map[w]} target {node_map[outcome]} ]"
+                )
+
+        lines.append("]")
+        return "\n".join(lines)
+
     def estimate_effect(
         self,
         df: pd.DataFrame,
@@ -236,10 +285,10 @@ class CausalEstimationEngine:
             estimator_method = "iv.instrumental_variable"
         elif backdoor_sets:
             strategy = "backdoor"
-            adjustment_set = backdoor_sets[0]
+            adjustment_set = [c for c in backdoor_sets[0] if c in df.columns]
         elif frontdoor_sets:
             strategy = "frontdoor"
-            adjustment_set = frontdoor_sets[0]
+            adjustment_set = [c for c in frontdoor_sets[0] if c in df.columns]
             if "backdoor" in estimator_method:
                 estimator_method = "frontdoor.two_stage_regression"
         elif instruments:
@@ -247,20 +296,11 @@ class CausalEstimationEngine:
             adjustment_set = [instruments[0]]
             estimator_method = "iv.instrumental_variable"
         else:
-            raise ValueError(
-                f"No valid Backdoor, Frontdoor, or Instrumental Variable strategies found in DAG for {treatment} -> {outcome}"
-            )
-
-        gml_graph = self._export_to_gml()
-        model = CausalModel(
-            data=df,
-            treatment=treatment,
-            outcome=outcome,
-            graph=gml_graph,
-        )
-        identified_estimand = model.identify_effect(proceed_when_unidentifiable=True)
+            strategy = "backdoor"
+            adjustment_set = []
 
         ci = None
+
         if "econml" in estimator_method:
             ate_value, ci = self._estimate_econml_native(
                 df=df,
@@ -270,7 +310,38 @@ class CausalEstimationEngine:
                 estimator_method=estimator_method,
                 method_params=method_params,
             )
+            estimand_expr = f"E[{outcome} | do({treatment})] via {strategy} adjustment {adjustment_set}"
+        elif "linear_regression" in estimator_method and strategy == "backdoor":
+            import statsmodels.api as sm
+
+            features = [treatment] + adjustment_set
+            X = sm.add_constant(df[features])
+            y = df[outcome]
+            ols_res = sm.OLS(y, X).fit()
+
+            ate_value = float(ols_res.params[treatment])
+            conf_int = ols_res.conf_int().loc[treatment]
+            ci = [float(conf_int[0]), float(conf_int[1])]
+            estimand_expr = (
+                f"OLS E[{outcome} | {treatment}, {', '.join(adjustment_set)}]"
+            )
         else:
+            gml_graph = self._build_minimal_gml(
+                treatment=treatment,
+                outcome=outcome,
+                adjustment_set=adjustment_set,
+                strategy=strategy,
+            )
+            model = CausalModel(
+                data=df,
+                treatment=treatment,
+                outcome=outcome,
+                graph=gml_graph,
+            )
+            identified_estimand = model.identify_effect(
+                proceed_when_unidentifiable=True
+            )
+
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 estimate = model.estimate_effect(
@@ -280,6 +351,7 @@ class CausalEstimationEngine:
                     test_significance=None,
                 )
             ate_value = float(estimate.value)
+            estimand_expr = str(identified_estimand)
             try:
                 intervals = estimate.get_confidence_intervals()
                 if intervals is not None:
@@ -289,6 +361,22 @@ class CausalEstimationEngine:
 
         refutation_results = []
         if run_refutations:
+            gml_graph = self._build_minimal_gml(
+                treatment=treatment,
+                outcome=outcome,
+                adjustment_set=adjustment_set,
+                strategy=strategy,
+            )
+            model = CausalModel(
+                data=df,
+                treatment=treatment,
+                outcome=outcome,
+                graph=gml_graph,
+            )
+            identified_estimand = model.identify_effect(
+                proceed_when_unidentifiable=True
+            )
+
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 ref_estimate = model.estimate_effect(
@@ -299,53 +387,55 @@ class CausalEstimationEngine:
                     test_significance=None,
                 )
 
-            try:
-                ref_rand = model.refute_estimate(
-                    identified_estimand,
-                    ref_estimate,
-                    method_name="random_common_cause",
-                )
-                passed = (
-                    abs(ref_rand.new_effect - ate_value) / (abs(ate_value) + 1e-6)
-                    < 0.40
-                )
-                refutation_results.append(
-                    RefutationResult(
-                        method="random_common_cause",
-                        estimated_effect=ate_value,
-                        new_effect=float(ref_rand.new_effect),
-                        passed=passed,
+                try:
+                    ref_rand = model.refute_estimate(
+                        identified_estimand,
+                        ref_estimate,
+                        method_name="random_common_cause",
                     )
-                )
-            except Exception:
-                pass
+                    passed = (
+                        abs(ref_rand.new_effect - ate_value) / (abs(ate_value) + 1e-6)
+                        < 0.40
+                    )
+                    refutation_results.append(
+                        RefutationResult(
+                            method="random_common_cause",
+                            estimated_effect=ate_value,
+                            new_effect=float(ref_rand.new_effect),
+                            passed=passed,
+                        )
+                    )
+                except Exception:
+                    pass
 
-            try:
-                ref_placebo = model.refute_estimate(
-                    identified_estimand,
-                    ref_estimate,
-                    method_name="placebo_treatment_refuter",
-                    placebo_type="permute",
-                )
-                passed = abs(ref_placebo.new_effect) < (abs(ate_value) * 0.35 + 0.20)
-                refutation_results.append(
-                    RefutationResult(
-                        method="placebo_treatment",
-                        estimated_effect=ate_value,
-                        new_effect=float(ref_placebo.new_effect),
-                        p_value=getattr(ref_placebo, "p_value", None),
-                        passed=passed,
+                try:
+                    ref_placebo = model.refute_estimate(
+                        identified_estimand,
+                        ref_estimate,
+                        method_name="placebo_treatment_refuter",
+                        placebo_type="permute",
                     )
-                )
-            except Exception:
-                pass
+                    passed = abs(ref_placebo.new_effect) < (
+                        abs(ate_value) * 0.35 + 0.20
+                    )
+                    refutation_results.append(
+                        RefutationResult(
+                            method="placebo_treatment",
+                            estimated_effect=ate_value,
+                            new_effect=float(ref_placebo.new_effect),
+                            p_value=getattr(ref_placebo, "p_value", None),
+                            passed=passed,
+                        )
+                    )
+                except Exception:
+                    pass
 
         return CausalEstimateSummary(
             treatment=treatment,
             outcome=outcome,
             identification_method=strategy,
             adjustment_set=adjustment_set,
-            estimand_expression=str(identified_estimand),
+            estimand_expression=estimand_expr,
             value=ate_value,
             estimator_method=estimator_method,
             confidence_intervals=ci,

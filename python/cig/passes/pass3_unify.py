@@ -1,6 +1,6 @@
 """
 Pass 3: SCM Graph Unification & Conflict Resolution.
-Consolidates EXTRACTED, INFERRED, and DISCOVERED edges, detects cycles/contradictions,
+Consolidates EXTRACTED, INFERRED, and DISCOVERED edges, detects multi-hop cycles and contradictions,
 flags AMBIGUOUS relationships, and produces .cig artifacts.
 """
 
@@ -60,16 +60,30 @@ class SCMGraphUnification:
         """Registers data-driven edges learned from observational distributions."""
         self.raw_edges.extend(edges)
 
+    def _has_path(self, adj: dict[str, set[str]], start: str, target: str) -> bool:
+        """Determines if there is an existing directed path from start to target using BFS."""
+        if start == target:
+            return True
+        visited = set()
+        queue = [start]
+        while queue:
+            curr = queue.pop(0)
+            if curr == target:
+                return True
+            if curr not in visited:
+                visited.add(curr)
+                queue.extend(adj.get(curr, set()) - visited)
+        return False
+
     def unify(self) -> SCMUnificationReport:
         """
-        Consolidates edges, resolves conflicts, and produces the unified SCM.
+        Consolidates edges, resolves 2-cycles and multi-hop cycles, and produces the unified SCM.
         """
         all_raw_nodes = set()
         for e in self.raw_edges:
             all_raw_nodes.add(e.source)
             all_raw_nodes.add(e.target)
 
-        # Seed terminal naked columns as base canonicals
         terminals = {
             NamespaceResolver.extract_terminal_column(n) for n in all_raw_nodes
         }
@@ -80,11 +94,9 @@ class SCMGraphUnification:
         ] = defaultdict(list)
 
         for e in self.raw_edges:
-            # Reconcile endpoints
             resolved_source = self.resolver.resolve(e.source)
             resolved_target = self.resolver.resolve(e.target)
 
-            # Avoid self-loops created by alias collapse (e.g. revenue -> pricing_mart.revenue)
             if resolved_source == resolved_target:
                 continue
 
@@ -120,7 +132,6 @@ class SCMGraphUnification:
                         )
 
             if extracted:
-                # Deterministic code lineage always takes precedence
                 self.unified_edges[(u, v)] = UnifiedEdge(
                     source=u,
                     target=v,
@@ -130,7 +141,6 @@ class SCMGraphUnification:
                     mechanisms=list(set(mechanisms)),
                 )
             else:
-                # Combine probabilistic confidences: 1 - product(1 - c)
                 prob_confidences = [e.confidence for e in inferred + discovered]
                 combined_conf = 1.0
                 for c in prob_confidences:
@@ -158,7 +168,6 @@ class SCMGraphUnification:
                 checked_pairs.add((u, v))
                 checked_pairs.add((v, u))
 
-                # If one is EXTRACTED and the other is probabilistic, EXTRACTED wins
                 if (
                     edge_uv.edge_type == "EXTRACTED"
                     and edge_vu.edge_type != "EXTRACTED"
@@ -170,7 +179,6 @@ class SCMGraphUnification:
                 ):
                     del self.unified_edges[(u, v)]
                 else:
-                    # Neither is deterministic ground-truth -> mark both as AMBIGUOUS
                     edge_uv.edge_type = "AMBIGUOUS"
                     edge_uv.conflict_notes = (
                         f"Contradicted by reverse edge ({v} -> {u})"
@@ -180,13 +188,42 @@ class SCMGraphUnification:
                         f"Contradicted by reverse edge ({u} -> {v})"
                     )
 
-        # 3. Analyze node out-degrees to identify God Confounders
+        # 3. Detect and break multi-hop cycles to enforce strict DAG acyclicity
+        dag_adj: dict[str, set[str]] = defaultdict(set)
+        # Prioritize edges: EXTRACTED (highest) > INFERRED > DISCOVERED (lowest)
+        priority_order = {
+            "EXTRACTED": 3,
+            "INFERRED": 2,
+            "DISCOVERED": 1,
+            "AMBIGUOUS": 0,
+        }
+        sorted_edges = sorted(
+            self.unified_edges.items(),
+            key=lambda item: (
+                priority_order.get(item[1].edge_type, 0),
+                item[1].confidence,
+            ),
+            reverse=True,
+        )
+
+        for (u, v), edge in sorted_edges:
+            if edge.edge_type == "AMBIGUOUS":
+                continue
+            # If adding u -> v creates a cycle (i.e., path v -> ... -> u already exists), mark as AMBIGUOUS
+            if self._has_path(dag_adj, start=v, target=u):
+                edge.edge_type = "AMBIGUOUS"
+                edge.conflict_notes = f"Creates feedback loop/cycle: path already exists from '{v}' to '{u}'"
+            else:
+                dag_adj[u].add(v)
+
+        # 4. Analyze node out-degrees to identify God Confounders
         out_degrees: dict[str, int] = defaultdict(int)
         all_nodes: set[str] = set()
-        for u, v in self.unified_edges.keys():
+        for (u, v), edge in self.unified_edges.items():
             all_nodes.add(u)
             all_nodes.add(v)
-            out_degrees[u] += 1
+            if edge.edge_type != "AMBIGUOUS":
+                out_degrees[u] += 1
 
         god_confounders = [node for node, deg in out_degrees.items() if deg >= 3]
 
@@ -235,7 +272,6 @@ class SCMGraphUnification:
                     "; ".join(edge.mechanisms) if edge.mechanisms else None,
                 )
                 loaded += 1
-            # Ambiguous edges are intentionally withheld from automated d-sep until resolved
         return loaded
 
     def export_artifacts(self, out_dir: str | Path = ".cig") -> None:
