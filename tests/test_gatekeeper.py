@@ -5,6 +5,8 @@ from click.testing import CliRunner
 import numpy as np
 import pandas as pd
 from cig.cli import main
+import click.testing
+from cig.cli import main
 
 
 def test_cig_check_passes_on_valid_lineage(tmp_path: Path):
@@ -82,3 +84,30 @@ def test_cig_check_fails_on_broken_sensitivity(tmp_path: Path):
 
     assert res.exit_code == 1
     assert "is below minimum threshold" in res.output
+
+
+def test_gatekeeper_summary_file_output(tmp_path):
+    summary_out = tmp_path / "summary.md"
+    runner = click.testing.CliRunner()
+
+    result = runner.invoke(
+        main,
+        [
+            "check",
+            "demo_cig",
+            "--data",
+            "demo_cig/data/transactions.csv",
+            "--treatment",
+            "discount_pct",
+            "--outcome",
+            "revenue",
+            "--summary-file",
+            str(summary_out),
+        ],
+    )
+
+    assert summary_out.exists()
+    content = summary_out.read_text(encoding="utf-8")
+    assert "🛡️ CIG Causal Gatekeeper Audit Report" in content
+    assert "Cinelli-Hazlett RV_q Bound" in content
+    assert "✅ Passed" in content

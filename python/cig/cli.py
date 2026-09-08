@@ -1135,6 +1135,20 @@ def policy_cmd(data: str, treatment: str, outcome: str, max_depth: int):
     type=float,
     help="Minimum allowable VanderWeele-Ding E-Value",
 )
+@click.option(
+    "--format",
+    "-f",
+    "output_format",
+    type=click.Choice(["text", "json", "markdown"], case_sensitive=False),
+    default="text",
+    help="Output report formatting for CI logs and PR comments",
+)
+@click.option(
+    "--summary-file",
+    type=click.Path(dir_okay=False, writable=True),
+    default=None,
+    help="Path to write Markdown summary (e.g. $GITHUB_STEP_SUMMARY)",
+)
 def check_cmd(
     path: str,
     manifest: str | None,
@@ -1143,6 +1157,8 @@ def check_cmd(
     outcome: str,
     min_rv: float,
     min_e_value: float,
+    output_format: str,
+    summary_file: str | None,
 ):
     """🛡️ CI/CD Gatekeeper: Verify causal DAG integrity and audit robustness thresholds."""
     base_path = Path(path)
@@ -1200,8 +1216,18 @@ def check_cmd(
 
     report = unifier.unify()
 
+    checks: list[tuple[str, bool, str]] = []
+
     # Rule 1: Acyclicity & Ambiguity Audit
-    if report.ambiguous_edges > 0:
+    acyclic_passed = report.ambiguous_edges == 0
+    checks.append(
+        (
+            "DAG Acyclicity & Ambiguity",
+            acyclic_passed,
+            f"{report.ambiguous_edges} ambiguous edge(s)",
+        )
+    )
+    if not acyclic_passed:
         console.print(
             f"[bold red]❌ CI Failure:[/bold red] Found {report.ambiguous_edges} ambiguous or cyclic edges in code lineage."
         )
@@ -1210,7 +1236,6 @@ def check_cmd(
                 console.print(
                     f"  [red]● {e.source} ⟷ {e.target}: {e.conflict_notes}[/red]"
                 )
-        sys.exit(1)
 
     engine = PyCausalEngine()
     unifier.populate_rust_engine(engine)
@@ -1219,31 +1244,51 @@ def check_cmd(
     t_res = resolve_node_name(treatment, all_nodes)
     y_res = resolve_node_name(outcome, all_nodes)
 
-    if t_res not in all_nodes or y_res not in all_nodes:
+    nodes_exist = t_res in all_nodes and y_res in all_nodes
+    checks.append(
+        (
+            "Target Nodes Existence",
+            nodes_exist,
+            f"Treatment: '{t_res}', Outcome: '{y_res}'",
+        )
+    )
+    if not nodes_exist:
         console.print(
             f"[bold red]❌ CI Failure:[/bold red] Target variables not found in compiled SCM ({treatment}, {outcome})."
         )
-        sys.exit(1)
 
     # Rule 2: Backdoor / Identification Verification
-    backdoors = engine.find_backdoor_adjustment_sets(t_res, y_res)
-    frontdoors = engine.find_frontdoor_adjustment_sets(t_res, y_res)
-    instruments = engine.find_instrumental_variables(t_res, y_res)
+    backdoors: list[list[str]] = []
+    frontdoors: list[list[str]] = []
+    instruments: list[str] = []
+    has_identification = False
 
-    has_identification = bool(backdoors or frontdoors or instruments)
-    if not has_identification:
+    if nodes_exist:
+        backdoors = engine.find_backdoor_adjustment_sets(t_res, y_res)
+        frontdoors = engine.find_frontdoor_adjustment_sets(t_res, y_res)
+        instruments = engine.find_instrumental_variables(t_res, y_res)
+        has_identification = bool(backdoors or frontdoors or instruments)
+
+    checks.append(
+        (
+            "Causal Identification Strategy",
+            has_identification,
+            f"{len(backdoors)} backdoor set(s), {len(frontdoors)} frontdoor set(s), {len(instruments)} instrument(s)",
+        )
+    )
+
+    if nodes_exist and not has_identification:
         console.print(
             f"[bold red]❌ CI Failure:[/bold red] Identification path broken between '{t_res}' and '{y_res}'. "
             "Unblocked backdoor paths exist with no valid adjustment set."
         )
-        sys.exit(1)
-
-    console.print(
-        f"[bold green]✔ Causal Identification Strategy Validated:[/bold green] Found {len(backdoors)} backdoor adjustment set(s)."
-    )
+    elif nodes_exist:
+        console.print(
+            f"[bold green]✔ Causal Identification Strategy Validated:[/bold green] Found {len(backdoors)} backdoor adjustment set(s)."
+        )
 
     # Rule 3: Empirical Sensitivity Thresholds (if data provided)
-    if data and Path(data).exists():
+    if data and Path(data).exists() and nodes_exist:
         df = pd.read_csv(data)
         if t_res in df.columns and y_res in df.columns:
             estimator = CausalEstimationEngine(engine)
@@ -1251,22 +1296,72 @@ def check_cmd(
                 df, treatment=t_res, outcome=y_res
             )
 
+            rv_passed = sens.rv_q >= min_rv
+            e_passed = sens.e_value >= min_e_value
+
+            checks.append(
+                (
+                    "Cinelli-Hazlett RV_q Bound",
+                    rv_passed,
+                    f"{sens.rv_q * 100:.1f}% (Required: ≥ {min_rv * 100:.1f}%)",
+                )
+            )
+            checks.append(
+                (
+                    "VanderWeele-Ding E-Value",
+                    e_passed,
+                    f"{sens.e_value:.2f} (Required: ≥ {min_e_value:.2f})",
+                )
+            )
+
             console.print(
                 f"[bold cyan]Cinelli-Hazlett RV_q:[/bold cyan] {sens.rv_q * 100:.1f}% (Required: ≥ {min_rv * 100:.1f}%)\n"
                 f"[bold cyan]VanderWeele-Ding E-Value:[/bold cyan] {sens.e_value:.2f} (Required: ≥ {min_e_value:.2f})"
             )
 
-            if sens.rv_q < min_rv:
+            if not rv_passed:
                 console.print(
                     f"[bold red]❌ CI Failure:[/bold red] Robustness value ({sens.rv_q * 100:.1f}%) is below minimum threshold ({min_rv * 100:.1f}%)."
                 )
-                sys.exit(1)
 
-            if sens.e_value < min_e_value:
+            if not e_passed:
                 console.print(
                     f"[bold red]❌ CI Failure:[/bold red] E-value ({sens.e_value:.2f}) is below minimum threshold ({min_e_value:.2f})."
                 )
-                sys.exit(1)
+
+    all_passed = all(c[1] for c in checks)
+
+    # Write Markdown report to summary_file if specified
+    if summary_file:
+        s_path = Path(summary_file)
+        lines = [
+            "## 🛡️ CIG Causal Gatekeeper Audit Report",
+            "",
+            f"**Target Directory**: `{path}` | **Treatment**: `{t_res}` | **Outcome**: `{y_res}`",
+            "",
+            "| Causal Invariant Check | Status | Empirical / Structural Metric |",
+            "| :--- | :---: | :--- |",
+        ]
+        for name, passed, metric in checks:
+            status_badge = "✅ Passed" if passed else "❌ Failed"
+            lines.append(f"| **{name}** | {status_badge} | `{metric}` |")
+
+        verdict_text = (
+            "🟢 **PR Approved - No Causal Leakage Detected**"
+            if all_passed
+            else "🔴 **PR Blocked - Broken Identification or Collider Bias Detected**"
+        )
+        lines.extend(
+            [
+                "",
+                f"**Verdict**: {verdict_text}",
+                "",
+            ]
+        )
+        s_path.write_text("\n".join(lines), encoding="utf-8")
+
+    if not all_passed:
+        sys.exit(1)
 
     console.print(
         "[bold green]✔ All causal regression checks passed successfully.[/bold green]"
