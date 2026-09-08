@@ -37,6 +37,7 @@ from cig.passes.pass5_counterfactual import StructuralCounterfactualEngine
 from cig.passes.pass6_active import ActiveInferenceAgent
 from cig.passes.pass4b_cate import PolicyTreeEngine
 from cig.passes.pass7_monitor import CausalInvarianceMonitor
+from cig.artifacts.openlineage_exporter import OpenLineageExporter
 
 console = Console()
 
@@ -235,6 +236,8 @@ def scan_cmd(path: str):
     HTMLDAGVisualizer.generate_html(report, out_path=html_path)
     SCMMarkdownExporter.export_to_file(report, out_path=md_path)
     GraphMLExporter.export_to_file(report, out_path=graphml_path)
+    openlineage_path = dot_cig_dir / "openlineage_event.json"
+    OpenLineageExporter.export_to_file(report, out_path=openlineage_path)
 
     table = Table(
         title="SCM Unification Summary", show_header=True, header_style="bold magenta"
@@ -256,6 +259,9 @@ def scan_cmd(path: str):
     console.print(f"[bold green]✔ Interactive visualizer:[/bold green] {html_path}")
     console.print(
         f"[bold green]✔ SCM Markdown & Mermaid documentation:[/bold green] {md_path}"
+    )
+    console.print(
+        f"[bold green]✔ OpenLineage Event JSON:[/bold green] {openlineage_path}"
     )
 
 
@@ -861,6 +867,8 @@ def run_pipeline_cmd(
     HTMLDAGVisualizer.generate_html(report, out_path=html_path)
     SCMMarkdownExporter.export_to_file(report, out_path=md_path)
     GraphMLExporter.export_to_file(report, out_path=graphml_path)
+    openlineage_path = dot_cig_dir / "openlineage_event.json"
+    OpenLineageExporter.export_to_file(report, out_path=openlineage_path)
 
     table = Table(
         title="SCM Pipeline Compilation Summary",
