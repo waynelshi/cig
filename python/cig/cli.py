@@ -962,5 +962,156 @@ def run_pipeline_cmd(
     )
 
 
+@main.command(name="check")
+@click.argument("path", default=".", type=click.Path(exists=True, file_okay=False))
+@click.option(
+    "--data",
+    "-d",
+    type=click.Path(exists=True, file_okay=True),
+    default=None,
+    help="Observational CSV dataset to audit",
+)
+@click.option(
+    "--treatment",
+    "-t",
+    required=True,
+    help="Core treatment variable to protect",
+)
+@click.option(
+    "--outcome",
+    "-y",
+    required=True,
+    help="Core KPI / target outcome to protect",
+)
+@click.option(
+    "--min-rv",
+    default=0.10,
+    type=float,
+    help="Minimum allowable Cinelli-Hazlett Robustness Value (0.0 to 1.0)",
+)
+@click.option(
+    "--min-e-value",
+    default=1.5,
+    type=float,
+    help="Minimum allowable VanderWeele-Ding E-Value",
+)
+def check_cmd(
+    path: str,
+    data: str | None,
+    treatment: str,
+    outcome: str,
+    min_rv: float,
+    min_e_value: float,
+):
+    """🛡️ CI/CD Gatekeeper: Verify causal DAG integrity and audit robustness thresholds."""
+    base_path = Path(path)
+    console.print(
+        Panel(
+            f"[bold cyan]🛡️ CIG CI/CD Causal Integrity Check:[/bold cyan] {base_path.resolve()}",
+            border_style="cyan",
+        )
+    )
+
+    unifier = SCMGraphUnification()
+    sql_parser = SQLLineageParser()
+    py_parser = PythonLineageParser()
+
+    for sf in base_path.rglob("*.sql"):
+        if ".venv" not in sf.parts and ".cig" not in sf.parts:
+            try:
+                edges = sql_parser.parse_file(sf)
+                if edges:
+                    unifier.add_extracted_edges(edges)
+            except Exception:
+                pass
+
+    for pf in base_path.rglob("*.py"):
+        if (
+            ".venv" not in pf.parts
+            and ".cig" not in pf.parts
+            and "test" not in pf.parts
+        ):
+            try:
+                edges = py_parser.parse_file(pf)
+                if edges:
+                    unifier.add_extracted_edges(edges)
+            except Exception:
+                pass
+
+    report = unifier.unify()
+
+    # Rule 1: Acyclicity & Ambiguity Audit
+    if report.ambiguous_edges > 0:
+        console.print(
+            f"[bold red]❌ CI Failure:[/bold red] Found {report.ambiguous_edges} ambiguous or cyclic edges in code lineage."
+        )
+        for e in report.edges:
+            if e.edge_type == "AMBIGUOUS":
+                console.print(
+                    f"  [red]● {e.source} ⟷ {e.target}: {e.conflict_notes}[/red]"
+                )
+        sys.exit(1)
+
+    engine = PyCausalEngine()
+    unifier.populate_rust_engine(engine)
+
+    all_nodes = [node["name"] for node in json.loads(engine.export_json())["nodes"]]
+    t_res = resolve_node_name(treatment, all_nodes)
+    y_res = resolve_node_name(outcome, all_nodes)
+
+    if t_res not in all_nodes or y_res not in all_nodes:
+        console.print(
+            f"[bold red]❌ CI Failure:[/bold red] Target variables not found in compiled SCM ({treatment}, {outcome})."
+        )
+        sys.exit(1)
+
+    # Rule 2: Backdoor / Identification Verification
+    backdoors = engine.find_backdoor_adjustment_sets(t_res, y_res)
+    frontdoors = engine.find_frontdoor_adjustment_sets(t_res, y_res)
+    instruments = engine.find_instrumental_variables(t_res, y_res)
+
+    has_identification = bool(backdoors or frontdoors or instruments)
+    if not has_identification:
+        console.print(
+            f"[bold red]❌ CI Failure:[/bold red] Identification path broken between '{t_res}' and '{y_res}'. "
+            "Unblocked backdoor paths exist with no valid adjustment set."
+        )
+        sys.exit(1)
+
+    console.print(
+        f"[bold green]✔ Causal Identification Strategy Validated:[/bold green] Found {len(backdoors)} backdoor adjustment set(s)."
+    )
+
+    # Rule 3: Empirical Sensitivity Thresholds (if data provided)
+    if data and Path(data).exists():
+        df = pd.read_csv(data)
+        if t_res in df.columns and y_res in df.columns:
+            estimator = CausalEstimationEngine(engine)
+            sens = estimator.compute_sensitivity_analysis(
+                df, treatment=t_res, outcome=y_res
+            )
+
+            console.print(
+                f"[bold cyan]Cinelli-Hazlett RV_q:[/bold cyan] {sens.rv_q * 100:.1f}% (Required: ≥ {min_rv * 100:.1f}%)\n"
+                f"[bold cyan]VanderWeele-Ding E-Value:[/bold cyan] {sens.e_value:.2f} (Required: ≥ {min_e_value:.2f})"
+            )
+
+            if sens.rv_q < min_rv:
+                console.print(
+                    f"[bold red]❌ CI Failure:[/bold red] Robustness value ({sens.rv_q * 100:.1f}%) is below minimum threshold ({min_rv * 100:.1f}%)."
+                )
+                sys.exit(1)
+
+            if sens.e_value < min_e_value:
+                console.print(
+                    f"[bold red]❌ CI Failure:[/bold red] E-value ({sens.e_value:.2f}) is below minimum threshold ({min_e_value:.2f})."
+                )
+                sys.exit(1)
+
+    console.print(
+        "[bold green]✔ All causal regression checks passed successfully.[/bold green]"
+    )
+
+
 if __name__ == "__main__":
     main()

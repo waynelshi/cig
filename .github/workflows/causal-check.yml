@@ -1,0 +1,54 @@
+name: Causal Integrity & Regression Check
+
+on:
+  pull_request:
+    paths:
+      - "models/**"
+      - "pipelines/**"
+      - "analytics/**"
+      - "data/**"
+  push:
+    branches:
+      - main
+
+jobs:
+  causal-gatekeeper:
+    name: Audit Structural Causal Model Integrity
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv & Python
+        uses: astral-sh/setup-uv@v3
+        with:
+          python-version: "3.11"
+          enable-cache: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install project dependencies
+        run: uv sync --all-extras
+
+      - name: Run CIG Causal Gatekeeper Check
+        run: |
+          uv run cig check demo_cig \
+            --data demo_cig/data/transactions.csv \
+            --treatment discount_pct \
+            --outcome revenue \
+            --min-rv 0.10 \
+            --min-e-value 1.5
+
+      - name: Build CIG Studio Artifacts
+        if: always()
+        run: |
+          uv run cig run demo_cig --data demo_cig/data/transactions.csv
+
+      - name: Upload Causal Graph & HTML Studio Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cig-causal-studio
+          path: demo_cig/.cig/
