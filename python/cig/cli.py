@@ -33,6 +33,7 @@ from cig.passes.pass3_unify import SCMGraphUnification, SCMUnificationReport
 from cig.passes.pass4_engine import CausalEstimationEngine
 from cig.passes.pass5_counterfactual import StructuralCounterfactualEngine
 from cig.passes.pass6_active import ActiveInferenceAgent
+from cig.passes.pass4b_cate import PolicyTreeEngine
 
 console = Console()
 
@@ -960,6 +961,100 @@ def run_pipeline_cmd(
     console.print(
         "[bold green]✔ CIG pipeline execution complete. Artifacts ready.[/bold green]"
     )
+
+
+@main.command(name="policy")
+@click.option(
+    "--data",
+    "-d",
+    required=True,
+    type=click.Path(exists=True, file_okay=True),
+    help="CSV dataset with covariates",
+)
+@click.option(
+    "--treatment",
+    "-t",
+    required=True,
+    help="Treatment policy lever (e.g., discount_pct)",
+)
+@click.option("--outcome", "-y", required=True, help="Outcome metric (e.g., revenue)")
+@click.option(
+    "--max-depth",
+    default=2,
+    type=int,
+    help="Maximum depth for interpretable policy tree",
+)
+def policy_cmd(data: str, treatment: str, outcome: str, max_depth: int):
+    """🌲 Pass 4B: Distill Heterogeneous Treatment Effects (CATE) into interpretable policy trees."""
+    df = pd.read_csv(data)
+
+    unifier = SCMGraphUnification()
+    # Populate baseline graph from directory if present
+    base_path = Path(".")
+    for sf in base_path.rglob("*.sql"):
+        if ".venv" not in sf.parts and ".cig" not in sf.parts:
+            try:
+                edges = SQLLineageParser().parse_file(sf)
+                if edges:
+                    unifier.add_extracted_edges(edges)
+            except Exception:
+                pass
+
+    unifier.unify()
+    engine = PyCausalEngine()
+    unifier.populate_rust_engine(engine)
+
+    all_nodes = [node["name"] for node in json.loads(engine.export_json())["nodes"]]
+    t_res = resolve_node_name(treatment, all_nodes)
+    y_res = resolve_node_name(outcome, all_nodes)
+
+    if t_res not in df.columns:
+        df[t_res] = df[treatment]
+    if y_res not in df.columns:
+        df[y_res] = df[outcome]
+
+    console.print(
+        f"[bold cyan]🌲 Fitting Causal Forest DML & Distilling Policy Tree for {t_res} ➔ {y_res}...[/bold cyan]"
+    )
+
+    tree_engine = PolicyTreeEngine(engine)
+    report = tree_engine.fit_policy_tree(
+        df=df,
+        treatment=t_res,
+        outcome=y_res,
+        max_depth=max_depth,
+    )
+
+    console.print(
+        Panel(
+            f"[bold]Population Average Treatment Effect (ATE):[/bold] [bold green]{report.population_ate:+.4f}[/bold green]\n"
+            f"[bold]Heterogeneous Modifiers Analyzed:[/bold] {', '.join(report.heterogeneous_features)}\n\n"
+            f"[bold cyan]Decision Tree Segmentation Logic:[/bold cyan]\n[dim]{report.rules_text}[/dim]",
+            title="🎯 Pass 4B: Heterogeneous CATE & Policy Rules",
+            border_style="magenta",
+        )
+    )
+
+    table = Table(
+        title="Distilled Policy Cohorts & Recommended Allocations",
+        show_header=True,
+        header_style="bold green",
+    )
+    table.add_column("Cohort ID", style="dim")
+    table.add_column("Sample Size", justify="right")
+    table.add_column("Mean CATE (τ)", justify="right")
+    table.add_column("Recommended Action", justify="left")
+
+    for seg in report.segments:
+        eff_color = "green" if seg.mean_treatment_effect >= 0 else "red"
+        table.add_row(
+            seg.segment_id,
+            str(seg.sample_size),
+            f"[{eff_color}]{seg.mean_treatment_effect:+.2f}[/{eff_color}]",
+            seg.recommended_policy,
+        )
+
+    console.print(table)
 
 
 @main.command(name="check")
