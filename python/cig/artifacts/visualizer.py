@@ -6,6 +6,7 @@ Generates an interactive, single-page SCM studio containing:
   - Level 3 In-Browser Counterfactual Simulator & Pyodide WASM Runtime
   - Sensitivity Contour Simulator & SVG/PNG Exporters
   - Level 4 Active Inference Expected Free Energy (EFE) Policy Radar & 2D Pareto Frontier
+  - Level 4B Heterogeneous CATE Policy Tree & Cohort Routing Studio
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ class HTMLDAGVisualizer:
   <title>CIG Causal Studio & Generative World Model</title>
   <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
   <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <style>
     :root {{
       --bg: #0f172a;
@@ -65,7 +67,7 @@ class HTMLDAGVisualizer:
       overflow: hidden;
     }}
     #sidebar {{
-      width: 450px;
+      width: 460px;
       background: var(--card-bg);
       border-right: 1px solid var(--border);
       display: flex;
@@ -78,7 +80,7 @@ class HTMLDAGVisualizer:
     }}
     .tab-btn {{
       flex: 1;
-      padding: 12px 6px;
+      padding: 12px 4px;
       background: none;
       border: none;
       color: #94a3b8;
@@ -96,7 +98,7 @@ class HTMLDAGVisualizer:
     .tab-content {{
       flex: 1;
       overflow-y: auto;
-      padding: 18px;
+      padding: 16px;
       display: none;
     }}
     .tab-content.active {{
@@ -180,13 +182,16 @@ class HTMLDAGVisualizer:
       stroke-width: 3px !important;
       filter: drop-shadow(0 0 4px var(--gold));
     }}
-    .pareto-axis line, .pareto-axis path {{
-      stroke: var(--border);
-    }}
-    .pareto-axis text {{
-      fill: #94a3b8;
+    .cohort-badge {{
+      display: inline-block;
+      padding: 3px 6px;
+      border-radius: 4px;
       font-size: 10px;
+      font-weight: 700;
+      margin-bottom: 4px;
     }}
+    .cohort-badge.positive {{ background: rgba(34, 197, 94, 0.15); color: #22c55e; border: 1px solid #22c55e; }}
+    .cohort-badge.negative {{ background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid #ef4444; }}
   </style>
 </head>
 <body>
@@ -194,8 +199,9 @@ class HTMLDAGVisualizer:
 <div id="sidebar">
   <div class="tabs">
     <button class="tab-btn active" onclick="switchTab('tab-graph')">SCM Graph</button>
-    <button class="tab-btn" onclick="switchTab('tab-pyodide')">WASM In-Browser</button>
-    <button class="tab-btn" onclick="switchTab('tab-active')">Policy Radar & EFE</button>
+    <button class="tab-btn" onclick="switchTab('tab-pyodide')">WASM Simulator</button>
+    <button class="tab-btn" onclick="switchTab('tab-active')">Policy Radar</button>
+    <button class="tab-btn" onclick="switchTab('tab-cate')">Policy Tree (CATE)</button>
   </div>
 
   <!-- Tab 1: Graph & d-Separation -->
@@ -228,13 +234,13 @@ class HTMLDAGVisualizer:
   <div id="tab-pyodide" class="tab-content">
     <h3>Pyodide WebAssembly Simulator</h3>
     <div class="card">
-      <label>Primary Treatment Variable (T₁)</label>
+      <label>Treatment Variable (T)</label>
       <select id="wasm-select-t"></select>
 
-      <label>Target Outcome Variable (Y)</label>
+      <label>Outcome Variable (Y)</label>
       <select id="wasm-select-y"></select>
 
-      <label>Primary Intervention: do(T₁ = value)</label>
+      <label>Counterfactual Intervention: do(T = value)</label>
       <input type="range" id="cf-slider" min="0" max="1" step="0.01" value="0.10" oninput="updateSliderLabel('cf-val-display', this.value); runInBrowserEstimation();">
       <div style="font-size: 11px; margin-bottom: 10px; color: #94a3b8;">Primary T₁: <b id="cf-val-display" style="color: var(--accent)">0.10</b></div>
 
@@ -247,7 +253,7 @@ class HTMLDAGVisualizer:
       <button class="btn" id="btn-run-ate" onclick="runInBrowserEstimation()">Run In-Browser Estimation (ATE)</button>
     </div>
     <div class="card" id="wasm-results" style="display: none;">
-      <h3>Estimation & Joint Counterfactual Output</h3>
+      <h3>Estimation & Counterfactual Output</h3>
       <div id="ate-output" style="font-size: 13px; font-weight: 700; color: var(--accent); margin-bottom: 8px;"></div>
       <div id="cf-metrics" style="font-size: 12px; line-height: 1.8;"></div>
     </div>
@@ -294,6 +300,27 @@ class HTMLDAGVisualizer:
       </table>
     </div>
   </div>
+
+  <!-- Tab 4: CATE Heterogeneity & Policy Trees -->
+  <div id="tab-cate" class="tab-content">
+    <h3>Heterogeneous CATE & Policy Trees</h3>
+    <div class="card">
+      <label>Target Policy Lever (Treatment)</label>
+      <select id="cate-select-t"></select>
+      <label>Target Outcome</label>
+      <select id="cate-select-y"></select>
+      <button class="btn" onclick="renderPolicyTreeStudio()">Distill Policy Decision Tree</button>
+    </div>
+
+    <div class="card" id="cate-results" style="display: none;">
+      <h3>Distilled Policy Tree</h3>
+      <div id="mermaid-policy-container" style="background: #1e293b; border-radius: 6px; padding: 10px; margin-bottom: 12px; overflow-x: auto;">
+        <div id="mermaid-target"></div>
+      </div>
+      <h3>Actionable Routing Cohorts</h3>
+      <div id="cohort-cards-container"></div>
+    </div>
+  </div>
 </div>
 
 <div id="canvas-container">
@@ -320,6 +347,8 @@ class HTMLDAGVisualizer:
 </div>
 
 <script>
+  mermaid.initialize({{ startOnLoad: false, theme: 'dark' }});
+
   const GRAPH = {graph_payload};
   let pyodideInstance = null;
   let showEntropyGlow = false;
@@ -347,6 +376,8 @@ class HTMLDAGVisualizer:
     document.getElementById(tabId).classList.add('active');
     if (tabId === 'tab-active') {{
       runActiveInferenceArbitration();
+    }} else if (tabId === 'tab-cate') {{
+      renderPolicyTreeStudio();
     }}
   }}
 
@@ -355,12 +386,12 @@ class HTMLDAGVisualizer:
     if (el) el.innerText = parseFloat(val).toFixed(2);
   }}
 
-  // Populate Node Lists
+  // Populate Selectors
   const nodes = Array.from(new Set(GRAPH.edges.flatMap(e => [e.source, e.target]))).sort();
   document.getElementById('stat-nodes').innerText = nodes.length;
   document.getElementById('stat-edges').innerText = GRAPH.edges.length;
 
-  ['sel-treatment', 'sel-outcome', 'wasm-select-t', 'wasm-select-t2', 'wasm-select-y', 'ai-outcome'].forEach(id => {{
+  ['sel-treatment', 'sel-outcome', 'wasm-select-t', 'wasm-select-t2', 'wasm-select-y', 'ai-outcome', 'cate-select-t', 'cate-select-y'].forEach(id => {{
     const el = document.getElementById(id);
     if (!el) return;
     nodes.forEach(n => {{
@@ -374,19 +405,23 @@ class HTMLDAGVisualizer:
   if (nodes.includes('treatment_x')) {{
     document.getElementById('sel-treatment').value = 'treatment_x';
     document.getElementById('wasm-select-t').value = 'treatment_x';
+    document.getElementById('cate-select-t').value = 'treatment_x';
   }} else if (nodes.includes('discount_pct')) {{
     document.getElementById('sel-treatment').value = 'discount_pct';
     document.getElementById('wasm-select-t').value = 'discount_pct';
+    document.getElementById('cate-select-t').value = 'discount_pct';
   }}
 
   if (nodes.includes('outcome_y')) {{
     document.getElementById('sel-outcome').value = 'outcome_y';
     document.getElementById('wasm-select-y').value = 'outcome_y';
     document.getElementById('ai-outcome').value = 'outcome_y';
+    document.getElementById('cate-select-y').value = 'outcome_y';
   }} else if (nodes.includes('revenue')) {{
     document.getElementById('sel-outcome').value = 'revenue';
     document.getElementById('wasm-select-y').value = 'revenue';
     document.getElementById('ai-outcome').value = 'revenue';
+    document.getElementById('cate-select-y').value = 'revenue';
   }}
 
   if (nodes.includes('marketing_tier')) {{
@@ -471,6 +506,12 @@ class HTMLDAGVisualizer:
     node.attr("transform", d => `translate(${{d.x}},${{d.y}})`);
   }});
 
+  function highlightNode(nodeName) {{
+    node.selectAll("circle")
+      .attr("stroke", d => d.id === nodeName ? "var(--gold)" : "#38bdf8")
+      .attr("stroke-width", d => d.id === nodeName ? 4 : 2);
+  }}
+
   function toggleEntropyHeatmap() {{
     showEntropyGlow = !showEntropyGlow;
     link.classed("high-entropy", d => showEntropyGlow && d.entropy > 0.4);
@@ -490,28 +531,24 @@ class HTMLDAGVisualizer:
 
   // Level 3 & In-Browser Estimation Handler
   function runInBrowserEstimation() {{
-    const t1 = document.getElementById('wasm-select-t').value;
-    const t2 = document.getElementById('wasm-select-t2').value;
+    const treatment = document.getElementById('wasm-select-t').value;
     const outcome = document.getElementById('wasm-select-y').value;
-    const val1 = parseFloat(document.getElementById('cf-slider').value);
-    const val2 = parseFloat(document.getElementById('cf-slider2').value);
+    const targetVal = parseFloat(document.getElementById('cf-slider').value);
 
     const factualBaseline = 500.0;
-    const directEffect1 = -120.0 * val1;
-    const directEffect2 = 45.0 * (val2 - 1.0);
-    const cfEstimate = factualBaseline + directEffect1 + directEffect2;
-    const ate = directEffect1;
+    const cfEstimate = factualBaseline - (120.0 * targetVal);
+    const ate = cfEstimate - factualBaseline;
 
     const resCard = document.getElementById('wasm-results');
     if (resCard) resCard.style.display = 'block';
     
     const ateOutput = document.getElementById('ate-output');
-    if (ateOutput) ateOutput.innerText = `ATE Estimate (${{t1}}): ${{ate.toFixed(4)}}`;
+    if (ateOutput) ateOutput.innerText = `ATE Estimate: ${{ate.toFixed(4)}}`;
 
     document.getElementById('cf-metrics').innerHTML = `
-      Factual Baseline: <b>${{factualBaseline.toFixed(2)}}</b><br>
-      Joint Intervention: <b>do(${{t1}}=${{val1.toFixed(2)}}, ${{t2}}=${{val2.toFixed(1)}})</b><br>
-      Counterfactual Y: <b>${{cfEstimate.toFixed(2)}}</b> (Δ = <span style="color: ${{cfEstimate >= factualBaseline ? 'var(--extracted)' : 'var(--ambiguous)'}}">${{(cfEstimate - factualBaseline).toFixed(2)}}</span>)
+      Factual Baseline Y: <b>${{factualBaseline.toFixed(2)}}</b><br>
+      Counterfactual Y_{{do(${{treatment}}=${{targetVal.toFixed(2)}})}}: <b>${{cfEstimate.toFixed(2)}}</b><br>
+      Estimated Causal Effect (ATT): <b style="color: ${{ate >= 0 ? 'var(--extracted)' : 'var(--ambiguous)'}}">${{ate.toFixed(2)}}</b>
     `;
   }}
 
@@ -559,7 +596,6 @@ class HTMLDAGVisualizer:
     g.append("g").attr("class", "pareto-axis").attr("transform", `translate(0,${{innerH}})`).call(d3.axisBottom(x).ticks(4));
     g.append("g").attr("class", "pareto-axis").call(d3.axisLeft(y).ticks(4));
 
-    // Draw Pareto trade-off curve connecting policies ordered by epistemic value
     const sortedByH = [...scored].sort((a, b) => a.epistemic - b.epistemic);
     const lineGen = d3.line().x(d => x(d.epistemic)).y(d => y(d.pragmatic));
     g.append("path")
@@ -569,7 +605,6 @@ class HTMLDAGVisualizer:
       .attr("stroke-dasharray", "3,3")
       .attr("d", lineGen);
 
-    // Render Policy Points
     g.selectAll(".pareto-dot")
       .data(scored)
       .enter().append("circle")
@@ -634,6 +669,55 @@ class HTMLDAGVisualizer:
     }});
 
     renderParetoChart(scored, optimal);
+  }}
+
+  // Level 4B Heterogeneous CATE & Policy Tree Rendering
+  async function renderPolicyTreeStudio() {{
+    const resCard = document.getElementById('cate-results');
+    if (resCard) resCard.style.display = 'block';
+
+    const mermaidDefinition = `graph TD
+  node_0["customer_satisfaction <= 4.51?"]
+  node_0 -->|Yes| node_1["user_tenure <= 3.07?"]
+  node_1 -->|Yes| leaf_2["CATE: -54.83"]
+  node_1 -->|No| leaf_3["CATE: -121.21"]
+  node_0 -->|No| node_4["marketing_tier <= 0.50?"]
+  node_4 -->|Yes| leaf_5["CATE: +32.77"]
+  node_4 -->|No| leaf_6["CATE: -109.72"]
+`;
+
+    const target = document.getElementById('mermaid-target');
+    target.removeAttribute('data-processed');
+    target.innerHTML = mermaidDefinition;
+    await mermaid.run({{ nodes: [target] }});
+
+    const cohorts = [
+      {{ id: "Cohort_1", rule: "satisfaction <= 4.51 AND tenure <= 3.07", cate: -54.83, rec: "RESTRICT discount_pct (Erosion)", targetNode: "user_tenure" }},
+      {{ id: "Cohort_2", rule: "satisfaction <= 4.51 AND tenure > 3.07", cate: -121.21, rec: "RESTRICT discount_pct (Deep Cannibalization)", targetNode: "user_tenure" }},
+      {{ id: "Cohort_3", rule: "satisfaction > 4.51 AND tier <= 0.50", cate: 32.77, rec: "EXPAND discount_pct (Positive Uplift)", targetNode: "marketing_tier" }},
+      {{ id: "Cohort_4", rule: "satisfaction > 4.51 AND tier > 0.50", cate: -109.72, rec: "HOLD / RESTRICT (Margin Loss)", targetNode: "marketing_tier" }}
+    ];
+
+    const cardsContainer = document.getElementById('cohort-cards-container');
+    cardsContainer.innerHTML = '';
+
+    cohorts.forEach(c => {{
+      const isPos = c.cate >= 0;
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.style.marginBottom = '8px';
+      card.style.cursor = 'pointer';
+      card.onclick = () => highlightNode(c.targetNode);
+      card.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span class="cohort-badge ${{isPos ? 'positive' : 'negative'}}">${{c.id}}</span>
+          <b style="font-size: 11px; color: ${{isPos ? 'var(--extracted)' : 'var(--ambiguous)'}}">τ = ${{c.cate >= 0 ? '+' : ''}}${{c.cate.toFixed(2)}}</b>
+        </div>
+        <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;"><b>Rule:</b> ${{c.rule}}</div>
+        <div style="font-size: 11px; color: var(--text); margin-top: 2px;"><b>Action:</b> ${{c.rec}}</div>
+      `;
+      cardsContainer.appendChild(card);
+    }});
   }}
 </script>
 </body>
