@@ -36,6 +36,7 @@ from cig.passes.pass4_engine import CausalEstimationEngine
 from cig.passes.pass5_counterfactual import StructuralCounterfactualEngine
 from cig.passes.pass6_active import ActiveInferenceAgent
 from cig.passes.pass4b_cate import PolicyTreeEngine
+from cig.passes.pass7_monitor import CausalInvarianceMonitor
 
 console = Console()
 
@@ -1262,6 +1263,107 @@ def check_cmd(
     console.print(
         "[bold green]✔ All causal regression checks passed successfully.[/bold green]"
     )
+
+
+@main.command(name="monitor")
+@click.option(
+    "--data",
+    "-d",
+    required=True,
+    type=click.Path(exists=True, file_okay=True),
+    help="Time-series or partitioned CSV dataset to audit for mechanism drift",
+)
+@click.option(
+    "--time-col",
+    "-tc",
+    required=True,
+    help="Timestamp or ordering column (e.g. created_at, date, order_id)",
+)
+@click.option(
+    "--alpha",
+    "-a",
+    default=0.05,
+    type=float,
+    help="Significance threshold for Kolmogorov-Smirnov invariance test",
+)
+@click.option(
+    "--target",
+    "-t",
+    default=None,
+    help="Optional specific target variable to test mechanism invariance for",
+)
+def monitor_cmd(data: str, time_col: str, alpha: float, target: str | None):
+    """⏱️ Pass 7: Audit causal invariance and detect structural mechanism drift across time windows."""
+    df = pd.read_csv(data)
+    graph_json_path = Path(".cig/cig_graph.json")
+
+    if not graph_json_path.exists():
+        console.print(
+            "[bold red]Error:[/bold red] No compiled SCM found. Run [bold cyan]cig run[/bold cyan] or [bold cyan]cig scan[/bold cyan] first."
+        )
+        sys.exit(1)
+
+    engine = PyCausalEngine()
+    with open(graph_json_path, "r", encoding="utf-8") as f:
+        graph_data = json.load(f)
+
+    for edge in graph_data.get("edges", []):
+        if isinstance(edge, (list, tuple)):
+            engine.add_extracted_edge(edge[0], edge[1], None, None)
+        elif edge.get("edge_type") == "EXTRACTED":
+            engine.add_extracted_edge(edge["source"], edge["target"], None, None)
+        else:
+            engine.add_inferred_edge(
+                edge["source"],
+                edge["target"],
+                float(edge.get("confidence", 1.0)),
+                None,
+                None,
+            )
+
+    all_nodes = [node["name"] for node in json.loads(engine.export_json())["nodes"]]
+    target_resolved = [resolve_node_name(target, all_nodes)] if target else None
+
+    monitor = CausalInvarianceMonitor(engine, significance_level=alpha)
+    report = monitor.audit_temporal_invariance(
+        df=df,
+        time_column=time_col,
+        target_nodes=target_resolved,
+    )
+
+    console.print(
+        Panel(
+            f"[bold]Ordering Feature:[/bold] {report.time_column}\n"
+            f"[bold]Mechanisms Audited:[/bold] {report.total_mechanisms_audited}\n"
+            f"[bold green]Stable Structural Invariants:[/bold green] {report.stable_mechanisms}\n"
+            f"[bold red]Broken Structural Mechanisms:[/bold red] {report.broken_mechanisms}",
+            title="⏱️ Pass 7: Causal Invariance & Mechanism Drift Report",
+            border_style="cyan",
+        )
+    )
+
+    table = Table(
+        title="Structural Equations P(Y | PA(Y)) Invariance Audit",
+        show_header=True,
+        header_style="bold green",
+    )
+    table.add_column("Target Variable (Y)", style="dim")
+    table.add_column("Causal Parents PA(Y)")
+    table.add_column("KS Statistic", justify="right")
+    table.add_column("p-value", justify="right")
+    table.add_column("Status", justify="center")
+
+    for r in report.results:
+        color = "green" if r.is_invariant else "bold red"
+        table.add_row(
+            r.target,
+            ", ".join(r.parents),
+            f"{r.ks_statistic:.4f}",
+            f"{r.p_value:.4e}",
+            f"[{color}]{r.status}[/{color}]",
+        )
+
+    console.print(table)
 
 
 if __name__ == "__main__":
