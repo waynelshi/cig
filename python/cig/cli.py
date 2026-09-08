@@ -1276,8 +1276,8 @@ def check_cmd(
 @click.option(
     "--time-col",
     "-tc",
-    required=True,
-    help="Timestamp or ordering column (e.g. created_at, date, order_id)",
+    default=None,
+    help="Optional timestamp or ordering column (e.g. created_at, date). Defaults to row index.",
 )
 @click.option(
     "--alpha",
@@ -1292,10 +1292,13 @@ def check_cmd(
     default=None,
     help="Optional specific target variable to test mechanism invariance for",
 )
-def monitor_cmd(data: str, time_col: str, alpha: float, target: str | None):
+@click.option("--graph", "-g", default=None, help="Path to .cig/cig_graph.json")
+def monitor_cmd(
+    data: str, time_col: str, alpha: float, target: str | None, graph: str | None
+):
     """⏱️ Pass 7: Audit causal invariance and detect structural mechanism drift across time windows."""
     df = pd.read_csv(data)
-    graph_json_path = Path(".cig/cig_graph.json")
+    graph_json_path = find_graph_path(graph, data)
 
     if not graph_json_path.exists():
         console.print(

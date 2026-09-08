@@ -61,7 +61,7 @@ class CausalInvarianceMonitor:
     def audit_temporal_invariance(
         self,
         df: pd.DataFrame,
-        time_column: str,
+        time_column: str | None = None,
         target_nodes: Sequence[str] | None = None,
         split_ratio: float = 0.5,
     ) -> CausalInvarianceReport:
@@ -70,11 +70,28 @@ class CausalInvarianceMonitor:
         fits structural regressions Y ~ PA(Y), and runs two-sample Kolmogorov-Smirnov
         tests on residuals to detect structural mechanism drift.
         """
-        if time_column not in df.columns:
-            raise ValueError(f"Time column '{time_column}' not found in dataframe.")
+        actual_time_col = time_column
+        if time_column and time_column in df.columns:
+            sorted_df = df.sort_values(by=time_column).reset_index(drop=True)
+        else:
+            # Look for common time/index columns
+            candidates = [
+                "timestamp",
+                "created_at",
+                "date",
+                "time",
+                "order_id",
+                "idx",
+                "id",
+            ]
+            found = [c for c in candidates if c in df.columns]
+            if found:
+                actual_time_col = found[0]
+                sorted_df = df.sort_values(by=actual_time_col).reset_index(drop=True)
+            else:
+                actual_time_col = "__index__"
+                sorted_df = df.copy().reset_index(drop=True)
 
-        # Sort chronologically
-        sorted_df = df.sort_values(by=time_column).reset_index(drop=True)
         split_idx = int(len(sorted_df) * split_ratio)
         e0 = sorted_df.iloc[:split_idx]
         e1 = sorted_df.iloc[split_idx:]
@@ -99,7 +116,7 @@ class CausalInvarianceMonitor:
             y_e1 = e1[target].values
             res_e1 = y_e1 - reg.predict(X_e1)
 
-            # Test null hypothesis: residuals come from the identical continuous distribution
+            # Test null hypothesis: residuals come from identical continuous distribution
             ks_res = stats.ks_2samp(res_e0, res_e1)
             p_val = float(ks_res.pvalue)
             ks_stat = float(ks_res.statistic)
@@ -108,7 +125,7 @@ class CausalInvarianceMonitor:
 
             if is_invariant:
                 status = "STABLE"
-                details = f"Mechanism P({target} | {', '.join(pa)}) holds across time windows (p={p_val:.4f})."
+                details = f"Mechanism P({target} | {', '.join(pa)}) holds across windows (p={p_val:.4f})."
             else:
                 status = "MECHANISM_SHIFT"
                 details = (
@@ -132,7 +149,7 @@ class CausalInvarianceMonitor:
         broken_count = len(results) - stable_count
 
         return CausalInvarianceReport(
-            time_column=time_column,
+            time_column=actual_time_col,
             total_mechanisms_audited=len(results),
             stable_mechanisms=stable_count,
             broken_mechanisms=broken_count,
