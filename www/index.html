@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CIG | Causal Inference Graph Engine</title>
+  <style>
+    :root { 
+      --bg: #ffffff; 
+      --text: #24292f; 
+      --heading: #1f2328;
+      --muted: #57606a;
+      --accent: #0969da; 
+      --card: #ffffff; 
+      --border: #d0d7de; 
+      --code-bg: #000000; 
+      --cmd-text: #ffffff;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 40px 20px; display: flex; justify-content: center; }
+    .container { max-width: 800px; width: 100%; }
+    h1 { color: var(--heading); font-size: 2.2rem; margin-bottom: 8px; }
+    p.lead { font-size: 1.15rem; color: var(--muted); line-height: 1.6; margin-top: 0; }
+    .cmd-box { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 18px 20px; margin: 30px 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.05rem; display: flex; justify-content: space-between; align-items: center; }
+    .cmd-text { color: var(--cmd-text); font-weight: 500; }
+    .badges { display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
+    .badges img { height: 20px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(31, 35, 40, 0.04); }
+    .card h3 { margin-top: 0; color: var(--heading); }
+    .card p { color: var(--text); line-height: 1.5; margin-bottom: 0; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="badges">
+      <span style="background: #1a7f37; color: #fff; font-size: 0.75rem; font-weight: 600; padding: 2px 8px; border-radius: 4px;">Apache-2.0</span>
+      <span style="background: #da4109; color: #fff; font-size: 0.75rem; font-weight: 600; padding: 2px 8px; border-radius: 4px;">v0.1.0-rust-hardened</span>
+    </div>
+    <h1>CIG</h1>
+    <p class="lead">Continuous Causal Inference Graph engine for modern data stacks and AI agents powered by Pearlian do-calculus and AST lineage compilation.</p>
+
+    <div class="cmd-box">
+      <span class="cmd-text"><b>$ curl -sSf https://cig.run | sh</b></span>
+    </div>
+
+    <div class="card">
+      <h3>Rust-Powered SCM Compiler &amp; Guard</h3>
+      <p>Parses SQLGlot, Python ASTs, and dbt manifests into unified DAGs, resolving cycle ambiguities and shielding against collider bias in real-time.</p>
+    </div>
+
+    <div class="card">
+      <h3>CI/CD Gatekeeping &amp; Invariance Monitoring</h3>
+      <p>Enforces Cinelli-Hazlett robustness bounds in pull requests and monitors P(Y | PA(Y)) mechanism drift across temporal production slices.</p>
+    </div>
+
+    <p style="text-align: center; margin-top: 40px; color: var(--muted); font-size: 0.9rem;">
+      Ecosystem: <a href="https://cig.run">cig.run</a> &bull; Source: <a href="https://github.com/waynelshi/cig">GitHub</a>
+    </p>
+  </div>
+</body>
+</html>

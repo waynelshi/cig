@@ -1,11 +1,11 @@
-# ⚡ cig (Causal Inference Graph)
-
-[![CI](https://github.com/waynelshi/cig/actions/workflows/cig_gatekeeper.yml/badge.svg)](https://github.com/waynelshi/cig/actions/workflows/cig_gatekeeper.yml)  
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)  
-[![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)  
+# `cig`: Continuous Causal Inference Graph Engine
+ 
+[![CI](https://github.com/waynelshi/cig/actions/workflows/cig_gatekeeper.yml/badge.svg)](https://github.com/waynelshi/cig/actions/workflows/cig_gatekeeper.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
+[![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
 
-**`cig`** is a high-performance continuous Causal Inference Graph engine designed for modern data stacks, analytics pipelines, and AI agent workflows. 
+**`cig`** is a high-performance continuous Causal Inference Graph engine designed for modern data stacks, analytics pipelines, and AI agent workflows.
 
 By unifying deterministic SQL/Python code lineages with domain hypotheses, dbt/SQLMesh manifests, and observational data discovery, `cig` automatically compiles Structural Causal Models (SCMs), detects confounder hazards (colliders, mediators, unblocked backdoor paths), bounds unobserved sensitivity, and enforces causal invariance in CI/CD workflows.
 
@@ -13,23 +13,24 @@ By unifying deterministic SQL/Python code lineages with domain hypotheses, dbt/S
 
 ## Key Features
 
-- **7-Pass Unified Pipeline**:  
-  - **Pass 1 (Deterministic Lineage)**: Column-level dependency tracking via `sqlglot` (PostgreSQL, BigQuery, Snowflake, DuckDB), Python AST parsing (Tree-sitter), and native dbt/SQLMesh manifest parsing.  
-  - **Pass 2 & 2B (Semantic Extraction & Causal Discovery)**: Regex/NLP domain hypothesis extraction from Markdown docs and dbt schema YAML, combined with continuous observational causal discovery.  
-  - **Pass 3 (Graph Unification & Conflict Resolution)**: Merges multi-source lineages into a unified DAG, detects 2-cycle contradictions, flags "God Confounders" (high-degree hub nodes), and syncs with the Rust `PyCausalEngine` core.  
-  - **Pass 4 & 4B (Identification, Sensitivity & Policy Trees)**: Automated backdoor/frontdoor/IV identification, EconML/DoWhy ATE estimation, Cinelli-Hazlett ($RV*_q$) sensitivity bounds, VanderWeele-Ding E-values, and CATE distillation into interpretable policy trees.*  
-  *- **Pass 5 & 6 (Counterfactual Simulation & Active Inference)**: Pearl Level 3 noise abduction ($Y_*{T=v}$) and Active Inference Expected Free Energy (EFE) minimization to arbitrate business interventions vs. epistemic exploration.  
-  - **Pass 7 (Temporal Causal Invariance Monitoring)**: Invariant Causal Prediction (ICP) mechanism drift detection to audit $P(Y mid PA(Y))$ across temporal partitions and identify broken structural equations.  
-- **CI/CD Gatekeeper (`cig check`)**: Automated PR gate that validates acyclicity, verifies causal identification paths, checks sensitivity thresholds, and posts summary tables to GitHub PRs.  
-- **Enterprise Ecosystem Connectors**: Standard OpenLineage event JSON exporter and drop-in Airflow/Dagster runtime invariant checks.  
-- **PreToolUse IDE Interceptors**: Native hooks for **Cursor** (`.cursorrules`) and **Claude Code** (`settings.json`) to block AI agents from committing confounded regressions.  
+- **7-Pass Unified Pipeline**:
+  - **Pass 1 (Deterministic Lineage)**: Column-level dependency tracking via `sqlglot` (PostgreSQL, BigQuery, Snowflake, DuckDB), Python AST parsing (Tree-sitter), and native dbt/SQLMesh manifest parsing.
+  - **Pass 2 & 2B (Semantic Extraction & Causal Discovery)**: Regex/NLP domain hypothesis extraction from Markdown docs and dbt schema YAML, combined with continuous observational causal discovery.
+  - **Pass 3 (Graph Unification & Conflict Resolution)**: Merges multi-source lineages into a unified DAG, detects 2-cycle contradictions, flags "God Confounders" (high-degree hub nodes), and syncs with the native Rust `PyCausalEngine` core.
+  - **Pass 4 & 4B (Identification, Sensitivity & Policy Trees)**: Automated backdoor/frontdoor/IV identification, EconML/DoWhy ATE estimation, Cinelli-Hazlett ($RV_q$) sensitivity bounds, VanderWeele-Ding E-values, and CATE distillation into interpretable policy trees.
+  - **Pass 5 & 6 (Counterfactual Simulation & Active Inference)**: Pearl Level 3 noise abduction ($Y_{T=v}$) and Active Inference Expected Free Energy (EFE) minimization to arbitrate business interventions vs. epistemic exploration.
+  - **Pass 7 (Temporal Causal Invariance Monitoring)**: Invariant Causal Prediction (ICP) mechanism drift detection to audit $P(Y \mid PA(Y))$ across temporal partitions and identify broken structural equations with `--strict` gating.
+- **CI/CD Gatekeeper (`cig check`)**: Automated PR gate that validates acyclicity, verifies causal identification paths, checks sensitivity thresholds, and posts summary tables to GitHub PR comments or `$GITHUB_STEP_SUMMARY`.
+- **Enterprise Ecosystem Connectors**: Standard OpenLineage event JSON exporter and drop-in Airflow/Dagster runtime invariant checks.
+- **PreToolUse IDE Interceptors (`cig-hook`)**: Native hooks for **Cursor** (`.cursorrules`) and **Claude Code** (`settings.json`) to block AI agents from committing confounded regressions.
+- **Structured Output (`--as-json`)**: Machine-readable JSON emission for `cig do` and `cig check` to enable autonomous agent tool loops.
 - **Standalone HTML Visualizer (`.cig/cig.html`)**: Interactive force-directed DAG canvas with Pyodide WebAssembly in-browser estimation and sensitivity contours.
 
 ---
 
 ## Architecture Overview
 
-```text  
+```text
 Codebase (SQL, Python, dbt, SQLMesh, Markdown, CSV)  
 │  
 ├── [Pass 1] AST & Manifest Parser ────► Deterministic Edges (1.0)  
@@ -41,33 +42,40 @@ Codebase (SQL, Python, dbt, SQLMesh, Markdown, CSV)
 │  
 ├── Export: .cig/cig_graph.json, .cig/SCM.md, .cig/cig.html, .cig/openlineage_event.json  
 │  
-├── [Pass 4] Identification, Refutation & Cinelli-Hazlett Sensitivity  
+├── [Pass 4] Identification, Refutation & Cinelli-Hazlett Sensitivity (--as-json)  
 ├── [Pass 4B] CATE Distillation into Interpretable Policy Trees  
 ├── [Pass 5] Pearl Level 3 Counterfactual Inversion (Abduction)  
 ├── [Pass 6] Active Inference EFE Policy Arbitration  
-├── [Pass 7] Invariant Causal Prediction (Temporal Mechanism Drift)  
+├── [Pass 7] Invariant Causal Prediction & Drift Monitor (--strict)  
 │  
 ▼  
 CI/CD Gatekeeper (`cig check`) & Orchestrator Hooks (Airflow / Dagster)
 ```
-## **Quick Start**
 
-### **1. Prerequisites**
+## Quick Start
+### 1. Universal Installer (Precompiled Wheel)
+Install precompiled binary wheels directly via the standalone installer:
+
+```bash
+curl -sSf https://cig.run | sh
+```
+
+### 2. Local Build from Source
+ **Prerequisites**
 
 * [Rust Toolchain (1.75+)](https://rustup.rs/)  
 * Python 3.10+  
 * [uv](https://docs.astral.sh/uv/) package manager
 
-### **2. Installation & Build**
 
-```Bash  
-git clone https://github.com/waynelshi/cig.git
+```Bash
+git clone [https://github.com/waynelshi/cig.git](https://github.com/waynelshi/cig.git)
 cd cig
 
-# Create virtual environment and sync dependencies  
-uv sync
+# Create virtual environment and sync dependencies
+uv sync --all-groups
 
-# Compile the Rust PyCausalEngine extension  
+# Compile the Rust PyCausalEngine extension
 uv run maturin develop
 ```
 ## **CLI Usage**
@@ -147,22 +155,21 @@ uv run cig active -y revenue -v 1500.0 -d data/transactions.csv
 ### **Temporal Mechanism Invariance Monitoring (`cig monitor`)**
 
 Audit structural equations across time slices to detect unobserved interventions or regime changes:
-
-```Bash  
-uv run cig monitor --data data/transactions.csv --time-col order_date --alpha 0.05
+```bash
+# Audit invariance and fail CI if structural mechanisms break
+uv run cig monitor --data data/transactions.csv --time-col order_date --alpha 0.05 --strict
 ```
 ## **CI/CD Gatekeeping (`cig check`)**
 
 Integrate cig check in pull requests to guard against DAG cycles, broken backdoor identification, and low sensitivity tolerance:
-
-```Bash  
-uv run cig check .   
-  --manifest target/manifest.json   
-  --data data/transactions.csv   
-  --treatment discount_pct   
-  --outcome revenue   
-  --min-rv 0.10   
-  --min-e-value 1.5   
+```Bash
+uv run cig check . \
+  --manifest target/manifest.json \
+  --data data/transactions.csv \
+  --treatment discount_pct \
+  --outcome revenue \
+  --min-rv 0.10 \
+  --min-e-value 1.5 \
   --summary-file pr_summary.md
 ```
 ### **GitHub Actions Workflow**
@@ -172,50 +179,47 @@ Add .github/workflows/cig_gatekeeper.yml:
 ```YAML  
 name: CIG Causal Gatekeeper
 
-on:  
-  pull_request:  
-    paths:  
-      - "models/**"  
-      - "dbt/**"  
-      - "**/*.sql"  
-      - "**/*.py"  
+on:
+  pull_request:
+    paths:
+      - "models/**"
+      - "dbt/**"
+      - "**/*.sql"
+      - "**/*.py"
       - "**/manifest.json"
 
-jobs:  
-  causal-integrity-audit:  
-    runs-on: ubuntu-latest  
-    permissions:  
-      contents: read  
+jobs:
+  causal-integrity-audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
       pull-requests: write
 
-    steps:  
-      - uses: actions/checkout@v4  
-      - uses: actions/setup-python@v5  
-        with:  
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
           python-version: "3.11"
 
-      - name: Install uv  
+      - name: Install uv
         run: curl -LsSf [https://astral.sh/uv/install.sh](https://astral.sh/uv/install.sh) | sh
 
-      - name: Install Dependencies  
-        run: uv sync
+      - name: Install Dependencies
+        run: uv sync --all-groups
 
-      - name: Run CIG Gatekeeper  
-        run: |  
-          uv run cig check .   
-            --manifest target/manifest.json   
-            --treatment discount_pct   
-            --outcome revenue   
-            --min-rv 0.10   
-            --min-e-value 1.5   
+      - name: Run CIG Gatekeeper
+        run: |
+          uv run cig check . \
+            --manifest target/manifest.json \
+            --treatment discount_pct \
+            --outcome revenue \
+            --min-rv 0.10 \
+            --min-e-value 1.5 \
             --summary-file "$GITHUB_STEP_SUMMARY"
 ```
 ## **Orchestration Hooks (Airflow & Dagster)**
-
 Halt data pipelines when structural invariance fails on production partitions:
-
 ### **Dagster Asset Check**
-
 ```Python  
 from cig.integrations.orchestration import make_dagster_asset_check
 
@@ -242,35 +246,31 @@ def audit_orders_invariance(df):
     )
 ```
 ## **IDE & AI Agent Guardrails**
-
 Prevent LLM assistants from generating unadjusted or collider-biased regressions:
-
-```Bash  
-# Verify regression code directly via CLI  
+```Bash
+# Verify regression code directly via CLI
 echo 'import statsmodels.formula.api as smf; model = smf.ols("revenue ~ discount_rate", data=df).fit()' | uv run cig-hook --strict
 ```
 ### **Cursor Rules (`.cursorrules`)**
-
-# Causal Inference Guardrail  
-Always verify candidate regressions against `.cig/cig_graph.json`.  
+```Markdown
+# Causal Inference Guardrail
+Always verify candidate regressions against `.cig/cig_graph.json`.
 Run `uv run cig-hook --file <target_file> --strict` before committing changes.
-
-### **Claude Code (.claude/settings.json)**
-
-```JSON  
-{  
-  "hooks": {  
-    "preToolUse": [  
-      {  
-        "matcher": { "tool": "FileEdit|WriteFile", "params": { "path": ".*.py$" } },  
-        "command": "uv run cig-hook --strict"  
-      }  
-    ]  
-  }  
+```
+### **Claude Code (`.claude/settings.json`)**
+```json
+{
+  "hooks": {
+    "preToolUse": [
+      {
+        "matcher": { "tool": "FileEdit|WriteFile", "params": { "path": ".*\\.py$" } },
+        "command": "uv run cig-hook --strict"
+      }
+    ]
+  }
 }
 ```
 ## **Development & Testing**
-
 Execute the comprehensive Rust and Python test suites:
 
 ```Bash  
@@ -280,9 +280,6 @@ cargo test --workspace
 # Run Python pipeline, CLI, and integration tests  
 uv run pytest tests/ -v
 ```
-
 ---
-
 ## License
-
 This project is licensed under the Apache License, Version 2.0. See the [LICENSE](LICENSE) file for details.
