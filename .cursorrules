@@ -1,14 +1,43 @@
-# Causal Inference Guardrail (CIG)
+# Causal Inference & SCM Governance Rules (.cursorrules)
 
-You are operating within a repository guarded by `cig` (Causal Inference Graph engine).
-Before executing regressions, training predictive models for policy intervention, or generating statistical estimation code, you MUST follow causal identification rules.
+You are an expert AI software engineer and causal inference scientist assisting with this repository.
+This repository relies on Structural Causal Models (SCMs) strictly governed by `cig` (Causal Inference Graph engine).
 
-## Mandatory Pre-Flight Check
-Whenever modifying scripts that perform statistical regression (e.g. `statsmodels`, `scikit-learn`, `econml`, `dbt` models):
+## Core Invariant: Causal Validity
+Never propose, edit, or commit regressions, predictive models used for intervention, or machine learning estimation scripts without explicit causal identification verification against `.cig/cig_graph.json`.
 
-1. Inspect `.cig/cig_graph.json` to verify the compiled Structural Causal Model (SCM).
-2. Never perform a naive regression `Y ~ T` when common causes $W$ exist ($T \leftarrow W \rightarrow Y$).
-3. Never condition on a collider node $C$ ($T \rightarrow C \leftarrow Y$) or post-treatment mediator unless explicitly performing Mediation Decomposition.
-4. Run the causal pre-flight validation check via bash tool:
+---
+
+## Strict Guardrails
+
+### 1. Regression & Feature Selection Hazards
+- **No Naive Regressions**: Never run unadjusted regressions (`Y ~ T`) when common causes $W$ exist ($T \leftarrow W \rightarrow Y$).
+- **No Kitchen-Sink Controls**: Never throw all available table columns into regressions (`smf.ols`, `sklearn.linear_model`, or tree-based feature selection) as automated controls.
+- **Collider Bias**: Never condition on, stratify by, or include variables identified as collider nodes or descendants of treatment and outcome ($T \rightarrow C \leftarrow Y$ or $T \rightarrow C \leftarrow U$).
+- **Mediator Leakage**: Do not control for post-treatment intermediate mediators unless explicitly tasked with decomposing Natural Direct Effects (NDE) vs. Indirect Effects (NIE).
+- **Backdoor Criterion**: Any causal claim or effect estimate must satisfy Pearl's Backdoor, Frontdoor, or Instrumental Variable criteria via an identified adjustment set.
+
+### 2. Mandatory Pre-Flight Verification Steps
+Before executing, editing, or finalizing any code involving causal estimation, statistical modeling, or feature engineering:
+
+1. **Verify Identification Strategy**:
+   Query the compiled SCM for valid adjustment sets:
+   ```bash
+   uv run cig do -t <treatment> -y <outcome>
+   ```
+2. **Audit One-Off Regression Formulas**:
+   Validate proposed regression formulas against the local AST guardrail:
+   ```bash
+   echo 'import statsmodels.formula.api as smf; model = smf.ols("<formula>", data=df).fit()' | uv run cig-hook --strict
+   ```
+3. **Audit Script Files In-Place:** 
+   Run the strict causal validation hook on target files:
    ```bash
    uv run cig-hook --file <target_file> --strict
+   ```
+### 3. Pipeline & CI/CD Invariants
+- Data & Model Integrity Check: Whenever modifying dbt models (`models/**/*.sql`), Python ETL transforms, SQLMesh state, or schema definitions, run:
+   ```bash
+   uv run cig check . --treatment <treatment> --outcome <outcome>
+   ```
+- Breaking Violations: Any detected 2-cycle contradictions, ambiguous edge orientations, broken backdoor paths, or sensitivity threshold failures ($RV_q < 0.10$ or $E\text{-value} < 1.5$) must be resolved before committing code.

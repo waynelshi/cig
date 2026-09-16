@@ -344,6 +344,13 @@ def discover_cmd(data: str, alpha: float, max_cond: int):
     help="Path to CSV dataset for causal effect estimation",
 )
 @click.option(
+    "--as-json",
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Output machine-readable JSON for agents and CI pipelines",
+)
+@click.option(
     "--method",
     "-m",
     default="backdoor.linear_regression",
@@ -364,6 +371,7 @@ def do_cmd(
     mediator: str | None,
     sensitivity: bool,
     data: str | None,
+    as_json: bool,
     method: str,
 ):
     """Identify adjustment sets and estimate causal effect, mediation, or sensitivity bounds."""
@@ -399,6 +407,17 @@ def do_cmd(
         frontdoors = engine.find_frontdoor_adjustment_sets(t_resolved, y_resolved)
         instruments = engine.find_instrumental_variables(t_resolved, y_resolved)
 
+        if as_json:
+            out_payload = {
+                "treatment": t_resolved,
+                "outcome": y_resolved,
+                "backdoor_adjustment_sets": backdoors,
+                "frontdoor_adjustment_sets": frontdoors,
+                "instrumental_variables": instruments,
+            }
+            click.echo(json.dumps(out_payload, indent=2))
+            return
+
         console.print(
             Panel(
                 f"[bold]Treatment:[/bold] {t_resolved}\n"
@@ -431,6 +450,10 @@ def do_cmd(
             outcome=y_resolved,
         )
 
+        if as_json:
+            click.echo(med_summary.model_dump_json(indent=2))
+            return
+
         console.print(
             Panel(
                 f"[bold]Total Effect (TE):[/bold] [bold green]{med_summary.total_effect:.4f}[/bold green]\n"
@@ -448,6 +471,9 @@ def do_cmd(
         sens = estimator.compute_sensitivity_analysis(
             df, treatment=t_resolved, outcome=y_resolved
         )
+        if as_json:
+            click.echo(sens.model_dump_json(indent=2))
+            return
         console.print(
             Panel(
                 f"[bold]Cinelli-Hazlett Robustness Value (RV_q=1.0):[/bold] [bold cyan]{sens.rv_q * 100:.1f}%[/bold cyan]\n"
@@ -470,7 +496,9 @@ def do_cmd(
         if summary.confidence_intervals
         else "N/A"
     )
-
+    if as_json:
+        click.echo(summary.model_dump_json(indent=2))
+        return
     console.print(
         Panel(
             f"[bold]Estimated Average Treatment Effect (ATE):[/bold] [bold green]{summary.value:.4f}[/bold green]\n"
@@ -1396,6 +1424,11 @@ def check_cmd(
     help="Optional specific target variable to test mechanism invariance for",
 )
 @click.option("--graph", "-g", default=None, help="Path to .cig/cig_graph.json")
+@click.option(
+    "--strict",
+    is_flag=True,
+    help="Exit with non-zero code if any causal mechanism drift is detected",
+)
 def monitor_cmd(
     data: str, time_col: str, alpha: float, target: str | None, graph: str | None
 ):
@@ -1470,6 +1503,12 @@ def monitor_cmd(
         )
 
     console.print(table)
+
+    if strict and report.broken_mechanisms > 0:
+        console.print(
+            f"[bold red]❌ Strict Failure: {report.broken_mechanisms} causal mechanism(s) broke across time partitions.[/bold red]"
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":
