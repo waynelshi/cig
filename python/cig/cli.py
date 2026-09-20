@@ -41,12 +41,15 @@ from cig.passes.pass7_monitor import CausalInvarianceMonitor
 from cig.artifacts.openlineage_exporter import OpenLineageExporter
 from cig.benchmarks.ab_test import execute_ab_benchmark
 from cig.benchmarks.collider import execute_collider_benchmark
+from cig.benchmarks.mbias import execute_mbias_benchmark
 from cig.benchmarks.formatters import (
     render_ab_terminal_table,
+    render_mbias_terminal_table,
     render_terminal_table,
     to_ab_markdown_table,
     to_latex_table,
     to_markdown_table,
+    to_mbias_markdown_table,
 )
 
 load_dotenv()
@@ -1526,8 +1529,8 @@ def monitor_cmd(
     "-t",
     default="collider",
     show_default=True,
-    type=click.Choice(["collider", "ab_test"], case_sensitive=False),
-    help="Target benchmark: 'collider' (LLM vs Rust) or 'ab_test' (Estimation Guard)",
+    type=click.Choice(["collider", "ab_test", "mbias"], case_sensitive=False),
+    help="Target benchmark: 'collider' (LLM vs Rust), 'ab_test' (Estimation Guard), or 'mbias' (Spurious Conditioning)",
 )
 @click.option(
     "--model",
@@ -1579,9 +1582,21 @@ def benchmark_command(
         elif output_format == "json":
             content = json.dumps(results, indent=2)
         elif output_format == "latex":
-            content = json.dumps(results, indent=2)  # Fallback or custom table
+            content = json.dumps(results, indent=2)
         else:
             render_ab_terminal_table(results)
+
+    elif target == "mbias":
+        click.echo(f"Executing '{target}' benchmark against {model}...")
+        results = execute_mbias_benchmark(model_name=model)
+        if output_format == "markdown":
+            content = to_mbias_markdown_table(results)
+        elif output_format == "json":
+            content = json.dumps(results, indent=2)
+        elif output_format == "latex":
+            content = json.dumps(results, indent=2)
+        else:
+            render_mbias_terminal_table(results)
 
     if output_file:
         output_file.write_text(content if content else "")

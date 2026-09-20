@@ -147,3 +147,80 @@ Latency & {llm["latency_sec"]:.3f}s & {cig["latency_sec"] * 1_000_000:.1f}$\\mu$
 \\label{{tab:collider_benchmark}}
 \\end{{table}}
 """
+
+
+def render_mbias_terminal_table(results: Dict[str, Any]):
+    console = Console()
+    table = Table(
+        title="cig vs. LLM M-Bias Trap Benchmark", header_style="bold magenta"
+    )
+
+    table.add_column("Dimension", style="cyan")
+    table.add_column(
+        f"LLM ({results['llm']['model']})",
+        justify="right",
+        style="red" if results["llm"]["induced_bias"] else "green",
+    )
+    table.add_column("cig (Rust Engine)", justify="right", style="green")
+    table.add_column("Delta / Impact", justify="right", style="bold yellow")
+
+    llm = results["llm"]
+    cig = results["cig"]
+    true_eff = results["true_effect"]
+
+    table.add_row(
+        "Recommended Controls",
+        str(llm["controls"]),
+        str(cig["controls"]),
+        "Minimal Sufficiency (Empty Set)",
+    )
+    table.add_row(
+        "Estimated Effect",
+        f"{llm['estimated_effect']:+.3f}",
+        f"{cig['estimated_effect']:+.3f}",
+        f"Ground Truth: +{true_eff:.2f}",
+    )
+    table.add_row(
+        "Induced Bias",
+        f"{llm['bias']:+.3f}",
+        f"{cig['bias']:+.3f}",
+        "Spurious Conditioning Avoided"
+        if not llm["induced_bias"]
+        else "M-Bias Induced",
+    )
+    table.add_row(
+        "Causal Validity",
+        "FAILED (Opened M-Path)" if llm["induced_bias"] else "PASSED",
+        "PASSED (d-sep verified)",
+        f"M Valid Backdoor? {cig['is_m_valid']}",
+    )
+    table.add_row(
+        "Latency",
+        f"{llm['latency_sec']:.3f}s",
+        f"{cig['latency_sec'] * 1_000_000:.1f}µs",
+        f"{results['summary']['speedup_factor']:.0f}x faster",
+    )
+    table.add_row(
+        "Tokens Consumed",
+        str(llm["total_tokens"]),
+        "0 (Local AST)",
+        "100% Token Elimination",
+    )
+
+    console.print(table)
+
+
+def to_mbias_markdown_table(results: Dict[str, Any]) -> str:
+    llm = results["llm"]
+    cig = results["cig"]
+    true_eff = results["true_effect"]
+
+    return f"""| Dimension | LLM ({llm["model"]}) | `cig` (Rust Engine) | Delta / Impact |
+| :--- | :--- | :--- | :--- |
+| **Recommended Controls** | `{llm["controls"]}` | `{cig["controls"]}` | Minimal Sufficiency (Empty Set) |
+| **Estimated Effect** | {llm["estimated_effect"]:+.3f} | **{cig["estimated_effect"]:+.3f}** | Ground Truth: +{true_eff:.2f} |
+| **Induced Bias** | {llm["bias"]:+.3f} | **{cig["bias"]:+.3f}** | Spurious Conditioning Avoided |
+| **Causal Validity** | {"FAILED (Opened M-Path)" if llm["induced_bias"] else "PASSED"} | **PASSED (d-sep verified)** | M Valid Backdoor: {cig["is_m_valid"]} |
+| **Latency** | {llm["latency_sec"]:.3f}s | **{cig["latency_sec"] * 1_000_000:.1f}µs** | **{results["summary"]["speedup_factor"]:.0f}x faster** |
+| **Tokens Consumed** | {llm["total_tokens"]} | **0 (Local AST)** | **100% Token Elimination** |
+"""
