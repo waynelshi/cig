@@ -39,9 +39,12 @@ from cig.passes.pass6_active import ActiveInferenceAgent
 from cig.passes.pass4b_cate import PolicyTreeEngine
 from cig.passes.pass7_monitor import CausalInvarianceMonitor
 from cig.artifacts.openlineage_exporter import OpenLineageExporter
+from cig.benchmarks.ab_test import execute_ab_benchmark
 from cig.benchmarks.collider import execute_collider_benchmark
 from cig.benchmarks.formatters import (
+    render_ab_terminal_table,
     render_terminal_table,
+    to_ab_markdown_table,
     to_latex_table,
     to_markdown_table,
 )
@@ -1523,7 +1526,8 @@ def monitor_cmd(
     "-t",
     default="collider",
     show_default=True,
-    help="Target benchmark: 'collider'",
+    type=click.Choice(["collider", "ab_test"], case_sensitive=False),
+    help="Target benchmark: 'collider' (LLM vs Rust) or 'ab_test' (Estimation Guard)",
 )
 @click.option(
     "--model",
@@ -1553,31 +1557,34 @@ def benchmark_command(
     target: str, model: str, output_format: str, output_file: Optional[Path]
 ):
     """Run automated causal identification benchmarks comparing cig against frontier LLMs."""
-    if target != "collider":
-        click.secho(
-            f"Unsupported benchmark target: {target}. Available: 'collider'",
-            fg="red",
-            err=True,
-        )
-        raise click.Abort()
+    content = None
 
-    click.echo(f"Executing '{target}' benchmark against {model}...")
-    results = execute_collider_benchmark(model_name=model)
+    if target == "collider":
+        click.echo(f"Executing '{target}' benchmark against {model}...")
+        results = execute_collider_benchmark(model_name=model)
+        if output_format == "markdown":
+            content = to_markdown_table(results)
+        elif output_format == "latex":
+            content = to_latex_table(results)
+        elif output_format == "json":
+            content = json.dumps(results, indent=2)
+        else:
+            render_terminal_table(results)
 
-    # Format output
-    if output_format == "markdown":
-        content = to_markdown_table(results)
-    elif output_format == "latex":
-        content = to_latex_table(results)
-    elif output_format == "json":
-        content = json.dumps(results, indent=2)
-    else:
-        render_terminal_table(results)
-        content = None
+    elif target == "ab_test":
+        click.echo(f"Executing '{target}' benchmark (Unguarded vs. CIG-Guarded OLS)...")
+        results = execute_ab_benchmark()
+        if output_format == "markdown":
+            content = to_ab_markdown_table(results)
+        elif output_format == "json":
+            content = json.dumps(results, indent=2)
+        elif output_format == "latex":
+            content = json.dumps(results, indent=2)  # Fallback or custom table
+        else:
+            render_ab_terminal_table(results)
 
-    # Handle output routing
     if output_file:
-        output_file.write_text(content if content else to_markdown_table(results))
+        output_file.write_text(content if content else "")
         click.echo(f"Artifact written to {output_file}")
     elif content and output_format != "table":
         click.echo(content)

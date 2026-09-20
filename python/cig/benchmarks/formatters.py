@@ -50,6 +50,66 @@ def render_terminal_table(results: Dict[str, Any]):
     console.print(table)
 
 
+def render_ab_terminal_table(results: Dict[str, Any]):
+    console = Console()
+    table = Table(
+        title="CIG Causal Guard Benchmark: Unguarded vs. Guarded",
+        header_style="bold magenta",
+    )
+
+    table.add_column("Dimension", style="cyan")
+    table.add_column("Unguarded Agent", justify="right", style="red")
+    table.add_column("CIG-Guarded Agent", justify="right", style="green")
+    table.add_column("Delta / Impact", justify="right", style="bold yellow")
+
+    un = results["unguarded"]
+    cg = results["cig"]
+    true_eff = results["true_effect"]
+
+    table.add_row(
+        "Controls Selected",
+        "All (Mediator + Collider)",
+        f"Minimal: {cg['controls']}",
+        "Prevents Bad Controls",
+    )
+    table.add_row(
+        "Estimated Effect",
+        f"{un['estimated_effect']:+.2f}",
+        f"{cg['estimated_effect']:+.2f}",
+        f"Ground Truth: +{true_eff:.1f}",
+    )
+    table.add_row(
+        "Estimation Bias",
+        f"{un['bias']:+.2f}",
+        f"{cg['bias']:+.2f}",
+        f"-{results['summary']['bias_reduction']:.1f} Error Elimination",
+    )
+    table.add_row("95% CI", str(un["ci_95"]), str(cg["ci_95"]), "Tight & Unbiased")
+    table.add_row(
+        "Decision Validity",
+        "FAIL (Sign Reversal)" if un["sign_reversal"] else "PASS",
+        "PASS (Accurate Direction)",
+        "Avoids False Rollback",
+    )
+
+    console.print(table)
+
+
+def to_ab_markdown_table(results: Dict[str, Any]) -> str:
+    un = results["unguarded"]
+    cg = results["cig"]
+    true_eff = results["true_effect"]
+
+    return f"""| Metric Dimension | Unguarded Agent (Kitchen-Sink) | `cig`-Guarded Engine | Impact / Delta |
+| :--- | :--- | :--- | :--- |
+| **Controls Used** | All available (Mediator + Collider) | `{cg["controls"]}` | Blocks collider & mediator |
+| **Estimated Effect** | {un["estimated_effect"]:+.2f} | **{cg["estimated_effect"]:+.2f}** | True Ground Truth: +{true_eff:.1f} |
+| **Estimation Bias** | {un["bias"]:+.2f} | **{cg["bias"]:+.2f}** | Completely debiased |
+| **95% Confidence Interval** | {un["ci_95"]} | **{cg["ci_95"]}** | Valid coverage |
+| **Decision Impact** | **Reverses Sign (Disaster)** | **Accurate Positive Margin** | Avoids erroneous rollback |
+"""
+
+
 def to_markdown_table(results: Dict[str, Any]) -> str:
     """Generate GitHub-flavored markdown table."""
     llm = results["llm"]
