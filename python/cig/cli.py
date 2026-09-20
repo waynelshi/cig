@@ -11,6 +11,8 @@ import json
 import sys
 import click
 import pandas as pd
+from typing import Optional
+from dotenv import load_dotenv
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -21,7 +23,6 @@ from cig.artifacts.graphml_exporter import GraphMLExporter
 from cig.artifacts.visualizer import HTMLDAGVisualizer
 from cig.passes.pass1_lineage import (
     DBTManifestParser,
-    ExtractedEdge,
     PythonLineageParser,
     SQLLineageParser,
     SQLMeshManifestParser,
@@ -38,7 +39,14 @@ from cig.passes.pass6_active import ActiveInferenceAgent
 from cig.passes.pass4b_cate import PolicyTreeEngine
 from cig.passes.pass7_monitor import CausalInvarianceMonitor
 from cig.artifacts.openlineage_exporter import OpenLineageExporter
+from cig.benchmarks.collider import execute_collider_benchmark
+from cig.benchmarks.formatters import (
+    render_terminal_table,
+    to_latex_table,
+    to_markdown_table,
+)
 
+load_dotenv()
 console = Console()
 
 
@@ -289,7 +297,7 @@ def discover_cmd(data: str, alpha: float, max_cond: int):
     engine = CausalDiscoveryEngine(significance_level=alpha, max_cond_size=max_cond)
 
     console.print(
-        f"[bold cyan]🔍 Running Continuous Causal Discovery on {data}...[/bold cyan]"
+        f"[bold cyan]Running Continuous Causal Discovery on {data}...[/bold cyan]"
     )
     discovered_edges = engine.discover_edges(df)
 
@@ -461,7 +469,7 @@ def do_cmd(
                 f"[bold]Natural Indirect Effect (NIE):[/bold] {med_summary.natural_indirect_effect:.4f}\n"
                 f"[bold]Proportion Mediated:[/bold] [bold cyan]{med_summary.proportion_mediated * 100:.1f}%[/bold cyan]\n"
                 f"[bold]Confounders Adjusted:[/bold] {med_summary.confounders or 'None'}",
-                title="🧬 Pearl's Mediation Decomposition",
+                title="Pearl's Mediation Decomposition",
                 border_style="cyan",
             )
         )
@@ -481,7 +489,7 @@ def do_cmd(
                 f"[bold]VanderWeele-Ding E-Value:[/bold] [bold green]{sens.e_value:.2f}[/bold green]\n"
                 f"[bold]Point Estimate / SE:[/bold] {sens.point_estimate:.4f} (SE: {sens.standard_error:.4f}, t: {sens.t_statistic:.2f})\n\n"
                 f"[dim]{sens.interpretation}[/dim]",
-                title="🛡️ Confounder Sensitivity Analysis",
+                title="Confounder Sensitivity Analysis",
                 border_style="yellow",
             )
         )
@@ -506,7 +514,7 @@ def do_cmd(
             f"[bold]Identification Strategy:[/bold] {summary.identification_method}\n"
             f"[bold]Conditioned Covariates:[/bold] {summary.adjustment_set or 'None'}\n"
             f"[bold]Estimator Algorithm:[/bold] {summary.estimator_method}",
-            title="📊 Causal Estimation Result",
+            title="Causal Estimation Result",
             border_style="green",
         )
     )
@@ -576,7 +584,7 @@ def counterfactual_cmd(treatment: str, value: float, outcome: str, data: str):
             f"[bold cyan]Observed Mean Outcome:[/bold cyan] {summary.mean_factual_outcome:.4f}\n"
             f"[bold green]Counterfactual Mean Outcome:[/bold green] {summary.mean_counterfactual_outcome:.4f}\n"
             f"[bold yellow]Net Policy Delta (Effect on Treated):[/bold yellow] [bold]{summary.average_treatment_effect_on_treated:+.4f}[/bold]",
-            title="🔮 Pearl Level 3 Counterfactual Simulator",
+            title="Pearl Level 3 Counterfactual Simulator",
             border_style="magenta",
         )
     )
@@ -671,7 +679,7 @@ def active_inference_cmd(outcome: str, target_val: float, data: str, graph: str 
             f"[bold]Identified Epistemic Gaps (Uncertainty):[/bold] {len(plan.epistemic_targets)} edge(s)\n"
             f"[bold cyan]Optimal Policy Selected:[/bold cyan] {plan.optimal_policy.policy_name if plan.optimal_policy else 'None'}\n\n"
             f"{plan.agent_rationale}",
-            title="🧠 Active Inference Agent (Free Energy Minimization)",
+            title="Active Inference Agent (Free Energy Minimization)",
             border_style="cyan",
         )
     )
@@ -763,7 +771,7 @@ def run_pipeline_cmd(
     outcome: str | None,
     goal: float | None,
 ):
-    """🚀 Run end-to-end multi-pass CIG causal pipeline: Scan -> Discover -> Unify -> Estimate -> Active Inference."""
+    """Run end-to-end multi-pass CIG causal pipeline: Scan -> Discover -> Unify -> Estimate -> Active Inference."""
     base_path = Path(path)
     console.print(
         Panel(
@@ -960,14 +968,12 @@ def run_pipeline_cmd(
                     f"[bold green]ATE Estimate:[/bold green] {summary.value:.4f} ({summary.identification_method})\n"
                     f"[bold]Cinelli-Hazlett Robustness (RV_q=1.0):[/bold] [bold cyan]{sens.rv_q * 100:.1f}%[/bold cyan]\n"
                     f"[bold]VanderWeele-Ding E-Value:[/bold] [bold yellow]{sens.e_value:.2f}[/bold yellow]",
-                    title="📊 Pass 4: Automated Econometric & Sensitivity Audit",
+                    title="Pass 4: Automated Econometric & Sensitivity Audit",
                     border_style="green",
                 )
             )
         except Exception as e:
-            console.print(
-                f"[dim yellow]⚠ Pass 4 Econometrics skipped: {e}[/dim yellow]"
-            )
+            console.print(f"[dim yellow]Pass 4 Econometrics skipped: {e}[/dim yellow]")
 
     if df is not None and target_y:
         agent = ActiveInferenceAgent(engine=engine, report=report)
@@ -1015,7 +1021,7 @@ def run_pipeline_cmd(
                         f"[bold cyan]Optimal Policy Selected:[/bold cyan] {opt_name}\n"
                         f"[bold]Min Expected Free Energy (G):[/bold] {min_efe:.3f}\n"
                         f"{plan.agent_rationale}",
-                        title="🧠 Pass 6: Active Inference EFE Policy Optimization",
+                        title="Pass 6: Active Inference EFE Policy Optimization",
                         border_style="cyan",
                     )
                 )
@@ -1051,7 +1057,7 @@ def run_pipeline_cmd(
     help="Maximum depth for interpretable policy tree",
 )
 def policy_cmd(data: str, treatment: str, outcome: str, max_depth: int):
-    """🌲 Pass 4B: Distill Heterogeneous Treatment Effects (CATE) into interpretable policy trees."""
+    """Pass 4B: Distill Heterogeneous Treatment Effects (CATE) into interpretable policy trees."""
     df = pd.read_csv(data)
 
     unifier = SCMGraphUnification()
@@ -1080,7 +1086,7 @@ def policy_cmd(data: str, treatment: str, outcome: str, max_depth: int):
         df[y_res] = df[outcome]
 
     console.print(
-        f"[bold cyan]🌲 Fitting Causal Forest DML & Distilling Policy Tree for {t_res} ➔ {y_res}...[/bold cyan]"
+        f"[bold cyan]Fitting Causal Forest DML & Distilling Policy Tree for {t_res} ➔ {y_res}...[/bold cyan]"
     )
 
     tree_engine = PolicyTreeEngine(engine)
@@ -1096,7 +1102,7 @@ def policy_cmd(data: str, treatment: str, outcome: str, max_depth: int):
             f"[bold]Population Average Treatment Effect (ATE):[/bold] [bold green]{report.population_ate:+.4f}[/bold green]\n"
             f"[bold]Heterogeneous Modifiers Analyzed:[/bold] {', '.join(report.heterogeneous_features)}\n\n"
             f"[bold cyan]Decision Tree Segmentation Logic:[/bold cyan]\n[dim]{report.rules_text}[/dim]",
-            title="🎯 Pass 4B: Heterogeneous CATE & Policy Rules",
+            title="Pass 4B: Heterogeneous CATE & Policy Rules",
             border_style="magenta",
         )
     )
@@ -1188,11 +1194,11 @@ def check_cmd(
     output_format: str,
     summary_file: str | None,
 ):
-    """🛡️ CI/CD Gatekeeper: Verify causal DAG integrity and audit robustness thresholds."""
+    """CI/CD Gatekeeper: Verify causal DAG integrity and audit robustness thresholds."""
     base_path = Path(path)
     console.print(
         Panel(
-            f"[bold cyan]🛡️ CIG CI/CD Causal Integrity Check:[/bold cyan] {base_path.resolve()}",
+            f"[bold cyan]CIG CI/CD Causal Integrity Check:[/bold cyan] {base_path.resolve()}",
             border_style="cyan",
         )
     )
@@ -1363,7 +1369,7 @@ def check_cmd(
     if summary_file:
         s_path = Path(summary_file)
         lines = [
-            "## 🛡️ CIG Causal Gatekeeper Audit Report",
+            "## CIG Causal Gatekeeper Audit Report",
             "",
             f"**Target Directory**: `{path}` | **Treatment**: `{t_res}` | **Outcome**: `{y_res}`",
             "",
@@ -1432,7 +1438,7 @@ def check_cmd(
 def monitor_cmd(
     data: str, time_col: str, alpha: float, target: str | None, graph: str | None
 ):
-    """⏱️ Pass 7: Audit causal invariance and detect structural mechanism drift across time windows."""
+    """Pass 7: Audit causal invariance and detect structural mechanism drift across time windows."""
     df = pd.read_csv(data)
     graph_json_path = find_graph_path(graph, data)
 
@@ -1476,7 +1482,7 @@ def monitor_cmd(
             f"[bold]Mechanisms Audited:[/bold] {report.total_mechanisms_audited}\n"
             f"[bold green]Stable Structural Invariants:[/bold green] {report.stable_mechanisms}\n"
             f"[bold red]Broken Structural Mechanisms:[/bold red] {report.broken_mechanisms}",
-            title="⏱️ Pass 7: Causal Invariance & Mechanism Drift Report",
+            title="Pass 7: Causal Invariance & Mechanism Drift Report",
             border_style="cyan",
         )
     )
@@ -1509,6 +1515,72 @@ def monitor_cmd(
             f"[bold red]❌ Strict Failure: {report.broken_mechanisms} causal mechanism(s) broke across time partitions.[/bold red]"
         )
         sys.exit(1)
+
+
+@main.command(name="benchmark")
+@click.option(
+    "--target",
+    "-t",
+    default="collider",
+    show_default=True,
+    help="Target benchmark: 'collider'",
+)
+@click.option(
+    "--model",
+    "-m",
+    default="gemini-3.6-flash",
+    show_default=True,
+    help="LLM model identifier",
+)
+@click.option(
+    "--format",
+    "-f",
+    "output_format",
+    default="table",
+    show_default=True,
+    type=click.Choice(["table", "markdown", "latex", "json"], case_sensitive=False),
+    help="Output format",
+)
+@click.option(
+    "--output",
+    "-o",
+    "output_file",
+    default=None,
+    type=click.Path(path_type=Path),
+    help="Filepath to write benchmark results",
+)
+def benchmark_command(
+    target: str, model: str, output_format: str, output_file: Optional[Path]
+):
+    """Run automated causal identification benchmarks comparing cig against frontier LLMs."""
+    if target != "collider":
+        click.secho(
+            f"Unsupported benchmark target: {target}. Available: 'collider'",
+            fg="red",
+            err=True,
+        )
+        raise click.Abort()
+
+    click.echo(f"Executing '{target}' benchmark against {model}...")
+    results = execute_collider_benchmark(model_name=model)
+
+    # Format output
+    if output_format == "markdown":
+        content = to_markdown_table(results)
+    elif output_format == "latex":
+        content = to_latex_table(results)
+    elif output_format == "json":
+        content = json.dumps(results, indent=2)
+    else:
+        render_terminal_table(results)
+        content = None
+
+    # Handle output routing
+    if output_file:
+        output_file.write_text(content if content else to_markdown_table(results))
+        click.echo(f"Artifact written to {output_file}")
+    elif content and output_format != "table":
+        click.echo(content)
 
 
 if __name__ == "__main__":

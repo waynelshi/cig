@@ -52,4 +52,8 @@ Cargo.lock
 .DS_Store
 
 # CIG Generated Local Artifacts
+.cig/.env
+
 .cig/
+**/.cig/
+.env
