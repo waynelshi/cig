@@ -224,3 +224,80 @@ def to_mbias_markdown_table(results: Dict[str, Any]) -> str:
 | **Latency** | {llm["latency_sec"]:.3f}s | **{cig["latency_sec"] * 1_000_000:.1f}µs** | **{results["summary"]["speedup_factor"]:.0f}x faster** |
 | **Tokens Consumed** | {llm["total_tokens"]} | **0 (Local AST)** | **100% Token Elimination** |
 """
+
+
+def render_frontdoor_terminal_table(results: Dict[str, Any]):
+    console = Console()
+    table = Table(
+        title="cig vs. LLM Frontdoor Criterion Benchmark", header_style="bold magenta"
+    )
+
+    table.add_column("Dimension", style="cyan")
+    table.add_column(
+        f"LLM ({results['llm']['model']})",
+        justify="right",
+        style="green" if results["llm"]["criterion"].lower() == "frontdoor" else "red",
+    )
+    table.add_column("cig (Rust SCM Engine)", justify="right", style="green")
+    table.add_column("Delta / Impact", justify="right", style="bold yellow")
+
+    llm = results["llm"]
+    cig = results["cig"]
+    summary = results["summary"]
+    true_eff = results["true_effect"]
+
+    table.add_row(
+        "Identified Strategy",
+        f"{llm['criterion'].upper()}",
+        cig["strategy"],
+        "Overcomes Latent Confounder",
+    )
+    table.add_row(
+        "Estimated Effect",
+        f"{llm['estimated_effect']:+.3f}",
+        f"{cig['estimated_effect']:+.3f}",
+        f"Ground Truth: +{true_eff:.2f}",
+    )
+    table.add_row(
+        "Estimation Bias",
+        f"{llm['bias']:+.3f}",
+        f"{cig['bias']:+.3f}",
+        "Zero Bias via 2-Stage SCM",
+    )
+    table.add_row(
+        "Graph Identification Latency",
+        f"{llm['latency_sec']:.3f}s",
+        f"{cig['graph_latency_sec'] * 1_000_000:.1f}µs",
+        f"{summary['speedup_factor']:.0f}x faster",
+    )
+    table.add_row(
+        "End-to-End Estimation Latency",
+        "N/A (Reasoning only)",
+        f"{cig['total_latency_sec'] * 1000:.1f}ms",
+        "Full 2-Stage OLS Fit (N=10k)",
+    )
+    table.add_row(
+        "Tokens Consumed",
+        str(llm["total_tokens"]),
+        "0 (Local AST)",
+        "100% Token Elimination",
+    )
+
+    console.print(table)
+
+
+def to_frontdoor_markdown_table(results: Dict[str, Any]) -> str:
+    llm = results["llm"]
+    cig = results["cig"]
+    summary = results["summary"]
+    true_eff = results["true_effect"]
+
+    return f"""| Dimension | LLM ({llm["model"]}) | `cig` (Rust SCM Engine) | Delta / Impact |
+| :--- | :--- | :--- | :--- |
+| **Identified Strategy** | `{llm["criterion"].upper()}` | **{cig["strategy"]}** | Overcomes Latent Confounder |
+| **Estimated Effect** | {llm["estimated_effect"]:+.3f} | **{cig["estimated_effect"]:+.3f}** | Ground Truth: +{true_eff:.2f} |
+| **Estimation Bias** | {llm["bias"]:+.3f} | **{cig["bias"]:+.3f}** | Zero Bias via 2-Stage SCM |
+| **Graph Identification Latency** | {llm["latency_sec"]:.3f}s | **{cig["graph_latency_sec"] * 1_000_000:.1f}µs** | **{summary["speedup_factor"]:.0f}x faster** |
+| **End-to-End Estimation Latency** | N/A (Reasoning only) | **{cig["total_latency_sec"] * 1000:.1f}ms** | Full 2-Stage OLS Fit (N=10k) |
+| **Tokens Consumed** | {llm["total_tokens"]} | **0 (Local AST)** | **100% Token Elimination** |
+"""

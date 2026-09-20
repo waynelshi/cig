@@ -41,12 +41,15 @@ from cig.passes.pass7_monitor import CausalInvarianceMonitor
 from cig.artifacts.openlineage_exporter import OpenLineageExporter
 from cig.benchmarks.ab_test import execute_ab_benchmark
 from cig.benchmarks.collider import execute_collider_benchmark
+from cig.benchmarks.frontdoor import execute_frontdoor_benchmark
 from cig.benchmarks.mbias import execute_mbias_benchmark
 from cig.benchmarks.formatters import (
     render_ab_terminal_table,
+    render_frontdoor_terminal_table,
     render_mbias_terminal_table,
     render_terminal_table,
     to_ab_markdown_table,
+    to_frontdoor_markdown_table,
     to_latex_table,
     to_markdown_table,
     to_mbias_markdown_table,
@@ -1529,8 +1532,10 @@ def monitor_cmd(
     "-t",
     default="collider",
     show_default=True,
-    type=click.Choice(["collider", "ab_test", "mbias"], case_sensitive=False),
-    help="Target benchmark: 'collider' (LLM vs Rust), 'ab_test' (Estimation Guard), or 'mbias' (Spurious Conditioning)",
+    type=click.Choice(
+        ["collider", "ab_test", "mbias", "frontdoor"], case_sensitive=False
+    ),
+    help="Target benchmark: 'collider' (LLM vs Rust), 'ab_test' (Estimation Guard), 'mbias' (Spurious Conditioning), or 'frontdoor' (Unobserved Confounding)",
 )
 @click.option(
     "--model",
@@ -1597,6 +1602,18 @@ def benchmark_command(
             content = json.dumps(results, indent=2)
         else:
             render_mbias_terminal_table(results)
+
+    elif target == "frontdoor":
+        click.echo(f"Executing '{target}' benchmark against {model}...")
+        results = execute_frontdoor_benchmark(model_name=model)
+        if output_format == "markdown":
+            content = to_frontdoor_markdown_table(results)
+        elif output_format == "json":
+            content = json.dumps(results, indent=2)
+        elif output_format == "latex":
+            content = json.dumps(results, indent=2)
+        else:
+            render_frontdoor_terminal_table(results)
 
     if output_file:
         output_file.write_text(content if content else "")
