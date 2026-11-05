@@ -316,7 +316,7 @@ impl<'a> CausalCriteriaEngine<'a> {
     /// Finds all valid single instrumental variables for (X -> Y)
     pub fn find_instrumental_variables(&self, x: &str, y: &str) -> Vec<String> {
         let mut valid_instruments = Vec::new();
-        for (name, _) in &self.causal_graph.node_indices {
+        for name in self.causal_graph.node_indices.keys() {
             if self.is_valid_instrument(name, x, y) {
                 valid_instruments.push(name.clone());
             }

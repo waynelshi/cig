@@ -11,6 +11,10 @@ on:
       - "data/**"
   workflow_dispatch:
 
+env:
+  UV_PYTHON: "3.11"
+  PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
+
 jobs:
   causal-integrity-audit:
     runs-on: ubuntu-latest
@@ -22,24 +26,23 @@ jobs:
       - name: Checkout Code Repository
         uses: actions/checkout@v4
 
-      - name: Set up Python Runtime
-        uses: actions/setup-python@v5
+      - name: Install uv & Python
+        uses: astral-sh/setup-uv@v3
         with:
           python-version: "3.11"
+          enable-cache: true
 
-      - name: Install uv package manager
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install CIG Engine Dependencies
         run: |
-          uv sync --frozen || uv sync
+          uv sync --frozen --python 3.11 || uv sync --python 3.11
 
       - name: Run CIG CI/CD Gatekeeper Check
         id: cig_check
         run: |
-          uv run cig check . \
+          uv run --python 3.11 cig check . \
             --treatment "${{ vars.CIG_TREATMENT || 'discount_pct' }}" \
             --outcome "${{ vars.CIG_OUTCOME || 'revenue' }}" \
             --min-rv 0.10 \

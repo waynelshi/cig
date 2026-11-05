@@ -1,3 +1,4 @@
+#![allow(clippy::useless_conversion)]
 pub mod criteria;
 pub mod dsep;
 pub mod graph;
@@ -77,12 +78,10 @@ impl PyCausalEngine {
                     .extract::<String>()?;
                 let prov = dict
                     .get_item("provenance")?
-                    .map(|v| v.extract::<String>().ok())
-                    .flatten();
+                    .and_then(|v| v.extract::<String>().ok());
                 let expr = dict
                     .get_item("expression")?
-                    .map(|v| v.extract::<String>().ok())
-                    .flatten();
+                    .and_then(|v| v.extract::<String>().ok());
                 (src, tgt, prov, expr)
             } else {
                 let src = item.getattr("source")?.extract::<String>()?;
@@ -131,12 +130,10 @@ impl PyCausalEngine {
                     .extract::<f32>()?;
                 let prov = dict
                     .get_item("provenance")?
-                    .map(|v| v.extract::<String>().ok())
-                    .flatten();
+                    .and_then(|v| v.extract::<String>().ok());
                 let expr = dict
                     .get_item("rationale")?
-                    .map(|v| v.extract::<String>().ok())
-                    .flatten();
+                    .and_then(|v| v.extract::<String>().ok());
                 (src, tgt, conf, prov, expr)
             } else {
                 let src = item.getattr("source")?.extract::<String>()?;

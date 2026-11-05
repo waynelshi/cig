@@ -46,6 +46,12 @@ pub struct CausalGraph {
     pub node_indices: HashMap<String, NodeIndex>,
 }
 
+impl Default for CausalGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CausalGraph {
     pub fn new() -> Self {
         Self {

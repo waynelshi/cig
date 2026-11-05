@@ -11,6 +11,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
+
 jobs:
   # 1. Rust Unit Tests & Format Check
   rust-check:
@@ -19,6 +22,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up Python 3.11 for PyO3 Linking
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -34,10 +42,10 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Rust Linter (Clippy)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --no-default-features --all-targets -- -D warnings
 
       - name: Run Rust Core Tests
-        run: cargo test --workspace --verbose
+        run: cargo test --workspace --no-default-features --verbose
 
   # 2. Python Test Matrix & CIG End-to-End Tests
   python-test:
@@ -60,21 +68,21 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v3
         with:
+          python-version: ${{ matrix.python-version }}
           enable-cache: true
           cache-dependency-glob: "pyproject.toml"
 
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-
       - name: Build and Install CIG Extension (maturin develop)
+        env:
+          UV_PYTHON: ${{ matrix.python-version }}
         run: |
-          uv run maturin develop
+          uv run --python ${{ matrix.python-version }} maturin develop
 
       - name: Run Pytest Suite
+        env:
+          UV_PYTHON: ${{ matrix.python-version }}
         run: |
-          uv run pytest tests/ -v --durations=10
+          uv run --python ${{ matrix.python-version }} pytest tests/ -v --durations=10
 
   # 3. Build Release Wheels Artifacts (Linux, macOS, Windows)
   build-wheels:

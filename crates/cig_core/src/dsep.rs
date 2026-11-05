@@ -24,12 +24,12 @@ impl<'a> DSeparationEngine<'a> {
         let n = self.causal_graph.graph.node_count();
         let mut descendants = vec![HashSet::new(); n];
 
-        for i in 0..n {
+        for (i, desc) in descendants.iter_mut().enumerate().take(n) {
             let start = NodeIndex::new(i);
             let mut dfs = Dfs::new(&self.causal_graph.graph, start);
             while let Some(nx) = dfs.next(&self.causal_graph.graph) {
                 if nx != start {
-                    descendants[i].insert(nx);
+                    desc.insert(nx);
                 }
             }
         }

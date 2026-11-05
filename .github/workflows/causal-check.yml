@@ -11,6 +11,10 @@ on:
     branches:
       - main
 
+env:
+  UV_PYTHON: "3.11"
+  PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
+
 jobs:
   causal-gatekeeper:
     name: Audit Structural Causal Model Integrity
@@ -30,11 +34,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install project dependencies
-        run: uv sync --all-extras
+        run: uv sync --all-extras --python 3.11
 
       - name: Run CIG Causal Gatekeeper Check
         run: |
-          uv run cig check demo_cig \
+          uv run --python 3.11 cig check demo_cig \
             --data demo_cig/data/transactions.csv \
             --treatment discount_pct \
             --outcome revenue \
@@ -44,7 +48,7 @@ jobs:
       - name: Build CIG Studio Artifacts
         if: always()
         run: |
-          uv run cig run demo_cig --data demo_cig/data/transactions.csv
+          uv run --python 3.11 cig run demo_cig --data demo_cig/data/transactions.csv
 
       - name: Upload Causal Graph & HTML Studio Artifacts
         if: always()

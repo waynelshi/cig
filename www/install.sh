@@ -10,7 +10,7 @@ CYAN="$(tput setaf 6 2>/dev/null || printf '')"
 RED="$(tput setaf 1 2>/dev/null || printf '')"
 RESET="$(tput sgr0 2>/dev/null || printf '')"
 
-printf "%b⚡ Installing CIG (Causal Inference Graph engine)...%b\n" "$CYAN" "$RESET"
+printf "%b⚡ Installing cig (Continuous Causal Governance Engine)...%b\n" "$CYAN" "$RESET"
 
 # 1. Detect OS and Architecture
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -19,15 +19,15 @@ ARCH="$(uname -m)"
 case "$OS" in
   linux)
     case "$ARCH" in
-      x86_64) WHEEL_MATCH="manylinux.*x86_64.whl" ;;
-      aarch64|arm64) WHEEL_MATCH="manylinux.*aarch64.whl" ;;
+      x86_64) WHEEL_MATCH="manylinux.*x86_64\.whl" ;;
+      aarch64|arm64) WHEEL_MATCH="manylinux.*aarch64\.whl" ;;
       *) printf "%bUnsupported architecture: %s%b\n" "$RED" "$ARCH" "$RESET"; exit 1 ;;
     esac
     ;;
   darwin)
     case "$ARCH" in
-      x86_64) WHEEL_MATCH="macosx.*x86_64.whl" ;;
-      arm64|aarch64) WHEEL_MATCH="macosx.*arm64.whl" ;;
+      x86_64) WHEEL_MATCH="macosx.*x86_64\.whl" ;;
+      arm64|aarch64) WHEEL_MATCH="macosx.*arm64\.whl" ;;
       *) printf "%bUnsupported architecture: %s%b\n" "$RED" "$ARCH" "$RESET"; exit 1 ;;
     esac
     ;;
@@ -37,12 +37,12 @@ case "$OS" in
     ;;
 esac
 
-# 2. Fetch Latest Release Assets
+# 2. Fetch Latest Release Assets (gracefully handle missing release or rate limits)
 printf "==> Resolving latest release from GitHub (%s)...\n" "$REPO"
-RELEASE_JSON="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest")"
+RELEASE_JSON="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null || true)"
 
-WHEEL_URL="$(echo "$RELEASE_JSON" | grep -o "https://[^\"]*${WHEEL_MATCH}" | head -n 1 || true)"
-SUMS_URL="$(echo "$RELEASE_JSON" | grep -o 'https://[^\"]*SHA256SUMS' | head -n 1 || true)"
+WHEEL_URL="$(printf "%s" "$RELEASE_JSON" | grep -o "https://[^\"]*${WHEEL_MATCH}" | head -n 1 || true)"
+SUMS_URL="$(printf "%s" "$RELEASE_JSON" | grep -o 'https://[^\"]*SHA256SUMS' | head -n 1 || true)"
 
 TMP_DIR="$(mktemp -d)"
 cleanup() { rm -rf "$TMP_DIR"; }
@@ -57,16 +57,20 @@ if [ -n "$WHEEL_URL" ]; then
   if [ -n "$SUMS_URL" ]; then
     printf "==> Verifying SHA-256 checksum...\n"
     curl -fsSL "$SUMS_URL" -o "${TMP_DIR}/SHA256SUMS"
-    (cd "$TMP_DIR" && grep "$WHEEL_FILE" SHA256SUMS | sha256sum -c -)
+    if command -v sha256sum >/dev/null 2>&1; then
+      (cd "$TMP_DIR" && grep "$WHEEL_FILE" SHA256SUMS | sha256sum -c -)
+    elif command -v shasum >/dev/null 2>&1; then
+      (cd "$TMP_DIR" && grep "$WHEEL_FILE" SHA256SUMS | shasum -a 256 -c -)
+    fi
   fi
 
   INSTALL_TARGET="${TMP_DIR}/${WHEEL_FILE}"
 else
-  printf "==> Precompiled binary not found for target. Falling back to git source build...\n"
+  printf "==> Precompiled wheel not found for %s/%s. Falling back to git source build...\n" "$OS" "$ARCH"
   INSTALL_TARGET="git+https://github.com/${REPO}.git"
 fi
 
-# 4. Install via uv or fallback
+# 4. Install via uv, pipx, or pip fallback
 mkdir -p "$BIN_DIR"
 
 if command -v uv >/dev/null 2>&1; then
@@ -77,13 +81,14 @@ elif command -v pipx >/dev/null 2>&1; then
   pipx install --force "$INSTALL_TARGET"
 else
   printf "==> Installing with pip user space...\n"
-  python3 -m pip install --user --upgrade "$INSTALL_TARGET"
+  python3 -m pip install --user --upgrade "$INSTALL_TARGET" 2>/dev/null || \
+    python3 -m pip install --user --break-system-packages --upgrade "$INSTALL_TARGET"
 fi
 
-printf "\n%b✔ CIG installed successfully!%b\n" "$GREEN" "$RESET"
+printf "\n%b✔ cig installed successfully!%b\n" "$GREEN" "$RESET"
 printf "Run '%b%scig --help%b' or '%b%scig-hook --help%b' to get started.\n" "$BOLD" "$CYAN" "$RESET" "$BOLD" "$CYAN" "$RESET"
 
 if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
-  printf "\n%bNote:%b %s is not in your PATH. Add it via:\n" "$BOLD" "$BIN_DIR"
+  printf "\n%bNote:%b %s is not in your PATH. Add it via:\n" "$BOLD" "$RESET" "$BIN_DIR"
   printf "  export PATH=\"%s:\$PATH\"\n\n" "$BIN_DIR"
 fi
