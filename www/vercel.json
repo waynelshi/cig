@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "cleanUrls": true,
   "rewrites": [
     {
       "source": "/",
@@ -7,7 +8,18 @@
         {
           "type": "header",
           "key": "user-agent",
-          "value": ".*(curl|Wget|HTTPie).*"
+          "value": ".*curl.*"
+        }
+      ],
+      "destination": "/install.sh"
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "header",
+          "key": "user-agent",
+          "value": ".*(wget|httpie).*"
         }
       ],
       "destination": "/install.sh"
@@ -23,7 +35,7 @@
         },
         {
           "key": "Cache-Control",
-          "value": "public, max-age=60, s-maxage=300"
+          "value": "no-cache, no-store, must-revalidate"
         }
       ]
     }
