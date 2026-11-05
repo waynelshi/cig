@@ -3,23 +3,12 @@
   "cleanUrls": true,
   "rewrites": [
     {
-      "source": "/",
+      "source": "/((?!install\\.sh).*)",
       "has": [
         {
           "type": "header",
           "key": "user-agent",
-          "value": ".*curl.*"
-        }
-      ],
-      "destination": "/install.sh"
-    },
-    {
-      "source": "/",
-      "has": [
-        {
-          "type": "header",
-          "key": "user-agent",
-          "value": ".*(wget|httpie).*"
+          "value": "(?i).*(curl|wget|httpie).*"
         }
       ],
       "destination": "/install.sh"
