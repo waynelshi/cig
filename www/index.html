@@ -3,7 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CIG | Causal Inference Graph Engine</title>
+  <title>cig | Continuous Causal Governance Engine</title>
+  <meta name="description" content="Continuous Causal Governance engine for modern data stacks and AI agents powered by Pearlian do-calculus and AST lineage compilation." />
   <style>
     :root { 
       --bg: #ffffff; 
@@ -13,20 +14,25 @@
       --accent: #0969da; 
       --card: #ffffff; 
       --border: #d0d7de; 
-      --code-bg: #000000; 
-      --cmd-text: #ffffff;
+      --code-bg: #0d1117; 
+      --cmd-text: #e6edf3;
     }
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 40px 20px; display: flex; justify-content: center; }
     .container { max-width: 800px; width: 100%; }
-    h1 { color: var(--heading); font-size: 2.2rem; margin-bottom: 8px; }
+    h1 { color: var(--heading); font-size: 2.2rem; margin-bottom: 6px; letter-spacing: -0.02em; }
+    h1 .tagline { font-size: 1rem; font-weight: 400; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin-left: 8px; vertical-align: middle; }
     p.lead { font-size: 1.15rem; color: var(--muted); line-height: 1.6; margin-top: 0; }
-    .cmd-box { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 18px 20px; margin: 30px 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.05rem; display: flex; justify-content: space-between; align-items: center; }
+    .cmd-box { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; margin: 28px 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1rem; display: flex; justify-content: space-between; align-items: center; }
     .cmd-text { color: var(--cmd-text); font-weight: 500; }
-    .badges { display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
-    .badges img { height: 20px; }
+    .cmd-text span { color: #7ee787; }
+    .copy-btn { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; cursor: pointer; transition: all 0.15s ease; }
+    .copy-btn:hover { background: #30363d; color: #fff; }
+    .badges { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+    .badge { font-size: 0.75rem; font-weight: 600; padding: 2px 8px; border-radius: 4px; color: #fff; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
     .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(31, 35, 40, 0.04); }
-    .card h3 { margin-top: 0; color: var(--heading); }
-    .card p { color: var(--text); line-height: 1.5; margin-bottom: 0; }
+    .card h3 { margin-top: 0; color: var(--heading); font-size: 1.15rem; }
+    .card p { color: var(--text); line-height: 1.55; margin-bottom: 0; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 4px; padding: 2px 6px; font-size: 0.88em; }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
   </style>
@@ -34,28 +40,33 @@
 <body>
   <div class="container">
     <div class="badges">
-      <span style="background: #1a7f37; color: #fff; font-size: 0.75rem; font-weight: 600; padding: 2px 8px; border-radius: 4px;">Apache-2.0</span>
-      <span style="background: #da4109; color: #fff; font-size: 0.75rem; font-weight: 600; padding: 2px 8px; border-radius: 4px;">v0.1.0-rust-hardened</span>
+      <span class="badge" style="background: #184ca0;">Apache-2.0</span>
+      <span class="badge" style="background: #da5609;">v0.1.0-rust-hardened</span>
+      <span class="badge" style="background: #6e7781;">sub-millisecond d-sep</span>
     </div>
-    <h1>CIG</h1>
-    <p class="lead">Continuous Causal Inference Graph engine for modern data stacks and AI agents powered by Pearlian do-calculus and AST lineage compilation.</p>
+
+    <h1>cig <span class="tagline">&bull; [c]ausal [i]nference [g]raph</span></h1>
+    <p class="lead">
+      Continuous Causal Governance engine for modern data stacks and AI agents. Compiles SQL and Python AST lineages into verified Structural Causal Models, eliminating collider bias and confounded regressions before runtime.
+    </p>
 
     <div class="cmd-box">
-      <span class="cmd-text"><b>$ curl -sSf https://cig.run | sh</b></span>
+      <span class="cmd-text"><span>$</span> curl -sSf https://cig.run | sh</span>
+      <button class="copy-btn" onclick="navigator.clipboard.writeText('curl -sSf https://cig.run | sh'); this.innerText='Copied!'; setTimeout(() => this.innerText='Copy', 1500);">Copy</button>
     </div>
 
     <div class="card">
-      <h3>Rust-Powered SCM Compiler &amp; Guard</h3>
-      <p>Parses SQLGlot, Python ASTs, and dbt manifests into unified DAGs, resolving cycle ambiguities and shielding against collider bias in real-time.</p>
+      <h3>Rust-Powered SCM Compiler &amp; Adjustment Guard</h3>
+      <p>Compiles SQLGlot queries, Python ASTs, and dbt manifests into unified directed acyclic graphs. Evaluates Pearlian d-separation and minimum sufficient adjustment sets in microsecond scale without token latency or model drift.</p>
     </div>
 
     <div class="card">
-      <h3>CI/CD Gatekeeping &amp; Invariance Monitoring</h3>
-      <p>Enforces Cinelli-Hazlett robustness bounds in pull requests and monitors P(Y | PA(Y)) mechanism drift across temporal production slices.</p>
+      <h3>CI/CD Gatekeeping &amp; Structural Invariance Monitoring</h3>
+      <p>Enforces Cinelli-Hazlett robustness bounds across pull requests to block bad controls. Tracks conditional mechanism drift <code>P(Y | PA(Y))</code> across temporal production slices to safeguard autonomous agent pipelines.</p>
     </div>
 
     <p style="text-align: center; margin-top: 40px; color: var(--muted); font-size: 0.9rem;">
-      Ecosystem: <a href="https://cig.run">cig.run</a> &bull; Source: <a href="https://github.com/waynelshi/cig">GitHub</a>
+      Documentation: <a href="https://cig.run">cig.run</a> &bull; Source: <a href="https://github.com/waynelshi/cig">GitHub</a>
     </p>
   </div>
 </body>
