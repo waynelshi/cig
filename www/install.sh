@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="cig-org/cig" # Replace with your actual GitHub org/repo
+REPO="waynelshi/cig"
 BIN_DIR="${HOME}/.local/bin"
 
 BOLD="$(tput bold 2>/dev/null || printf '')"
