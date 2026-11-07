@@ -108,6 +108,6 @@ def test_gatekeeper_summary_file_output(tmp_path):
 
     assert summary_out.exists()
     content = summary_out.read_text(encoding="utf-8")
-    assert "🛡️ CIG Causal Gatekeeper Audit Report" in content
+    assert "CIG Causal Gatekeeper Audit Report" in content
     assert "Cinelli-Hazlett RV_q Bound" in content
     assert "✅ Passed" in content
