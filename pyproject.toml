@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Causal Inference Graph Engine for Codebases & Data Pipelines"
 readme = "README.md"
 authors = [{ name = "cig contributors" }]
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "sqlglot>=23.0.0",
     "pydantic>=2.6.0",

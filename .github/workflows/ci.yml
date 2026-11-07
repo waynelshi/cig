@@ -72,17 +72,24 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "pyproject.toml"
 
+      - name: Install Project & Test Dependencies
+        env:
+          UV_PYTHON: ${{ matrix.python-version }}
+        run: |
+          uv sync --all-extras --all-groups --python ${{ matrix.python-version }}
+          uv pip install pytest maturin
+
       - name: Build and Install CIG Extension (maturin develop)
         env:
           UV_PYTHON: ${{ matrix.python-version }}
         run: |
-          uv run --python ${{ matrix.python-version }} maturin develop
+          uv run --no-sync maturin develop
 
       - name: Run Pytest Suite
         env:
           UV_PYTHON: ${{ matrix.python-version }}
         run: |
-          uv run --python ${{ matrix.python-version }} pytest tests/ -v --durations=10
+          uv run --no-sync pytest tests/ -v --durations=10
 
   # 3. Build Release Wheels Artifacts (Linux, macOS, Windows)
   build-wheels:
