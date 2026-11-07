@@ -89,7 +89,10 @@ fi
 printf "\n%b✔ cig installed successfully!%b\n" "$GREEN" "$RESET"
 printf "Run '%b%scig --help%b' or '%b%scig-hook --help%b' to get started.\n" "$BOLD" "$CYAN" "$RESET" "$BOLD" "$CYAN" "$RESET"
 
-if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
-  printf "\n%bNote:%b %s is not in your PATH. Add it via:\n" "$BOLD" "$RESET" "$BIN_DIR"
-  printf "  export PATH=\"%s:\$PATH\"\n\n" "$BIN_DIR"
-fi
+case ":$PATH:" in
+  *":$BIN_DIR:"*) ;;
+  *)
+    printf "\n%bNote:%b %s is not in your PATH. Add it via:\n" "$BOLD" "$RESET" "$BIN_DIR"
+    printf "  export PATH=\"%s:\$PATH\"\n\n" "$BIN_DIR"
+    ;;
+esac
