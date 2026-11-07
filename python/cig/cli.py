@@ -4,6 +4,8 @@ Provides command-line commands for scanning codebase lineages, compiling SCM DAG
 running do-calculus causal estimations, mediation decompositions, and confounder sensitivity analysis.
 """
 
+import warnings
+warnings.filterwarnings('ignore', category=SyntaxWarning)
 from __future__ import annotations
 
 from pathlib import Path
